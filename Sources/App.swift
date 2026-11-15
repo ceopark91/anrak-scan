@@ -133,6 +133,11 @@ struct ContentView: View {
                         .fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 16)
                         .background(Color.white, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(.black)
                 }
+                Button { share = STLExport.build(store: store) } label: {
+                    Label("3D 파일 보내기 (STL · mm)", systemImage: "cube")
+                        .fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 16)
+                        .background(Color.white, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(.black)
+                }
             }
         }
     }

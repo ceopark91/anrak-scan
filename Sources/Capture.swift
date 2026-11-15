@@ -148,7 +148,9 @@ struct CaptureScreen: View {
         let fileName = "room_\(uid()).usdz"
         let url = Store.docs.appendingPathComponent(fileName)
         let ok = (try? room.export(to: url)) != nil
-        if let r = RoomConverter.convert(room, name: name, sessionId: cc.sessionId, usdz: ok ? fileName : nil) {
+        if var r = RoomConverter.convert(room, name: name, sessionId: cc.sessionId, usdz: ok ? fileName : nil) {
+            let rawName = "room_\(uid()).json"
+            if let d = try? JSONEncoder().encode(room), (try? d.write(to: Store.docs.appendingPathComponent(rawName))) != nil { r.raw = rawName }
             store.add(r)
         } else {
             cc.error = "벽을 3개 이상 찾지 못했습니다. 다시 스캔해 주세요"

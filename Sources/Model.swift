@@ -35,6 +35,7 @@ struct ScanRoom: Codable, Identifiable, Hashable {
     var ceil: Int          // 천장 높이(mm)
     var walls: [AWall]
     var usdz: String?      // Documents 안 파일 이름
+    var raw: String? = nil  // RoomPlan 원본(CapturedRoom JSON) 파일 이름 → STL
     var date: Date
 
     /// 안락실측 geo()와 같은 계산: 방 안쪽 모서리 점(방 좌표)
@@ -125,7 +126,7 @@ final class Store: ObservableObject {
     }
 
     func delete(_ room: ScanRoom) {
-        if let f = room.usdz { try? FileManager.default.removeItem(at: Store.docs.appendingPathComponent(f)) }
+        for f in [room.usdz, room.raw].compactMap({ $0 }) { try? FileManager.default.removeItem(at: Store.docs.appendingPathComponent(f)) }
         site.rooms.removeAll { $0.id == room.id }
     }
 
