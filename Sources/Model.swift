@@ -36,6 +36,11 @@ struct ScanRoom: Codable, Identifiable, Hashable {
     var walls: [AWall]
     var usdz: String?      // Documents 안 파일 이름
     var raw: String? = nil  // RoomPlan 원본(CapturedRoom JSON) 파일 이름 → STL
+    var moldType: String? = nil   // 현재 천장 몰딩: none, flat, step, minus
+    var moldH: Int? = nil         // 몰딩 높이(mm)
+    var baseH: Int? = nil         // 현재 걸레받이 높이(mm), 0이면 없음
+    /// 도배하는 벽 높이 = 천장 높이 − 몰딩 − 걸레받이
+    var paperH: Int { max(300, ceil - ((moldType ?? "none") == "none" ? 0 : (moldH ?? 0)) - (baseH ?? 0)) }
     var date: Date
 
     /// 안락실측 geo()와 같은 계산: 방 안쪽 모서리 점(방 좌표)
@@ -83,6 +88,55 @@ struct Site: Codable {
     var addr: String = ""
     var rooms: [ScanRoom] = []
     var offsets: [String: [Double]] = [:]   // 스캔 묶음(세션)마다 도면 위치 보정
+    var align: Double? = nil                // 도면 정렬 각도(도). nil이면 벽 방향으로 자동
+    var turn: Int = 0                       // 추가로 90° 단위 돌리기
+    var est: [String: RoomSel] = [:]        // 방 id → 공사 선택
+    var extras: [ExtraLine] = []
+    var marginPct: Double = 10
+    var vat: Bool = true
+
+    init() {}
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: K.self)
+        name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        addr = (try? c.decode(String.self, forKey: .addr)) ?? ""
+        rooms = (try? c.decode([ScanRoom].self, forKey: .rooms)) ?? []
+        offsets = (try? c.decode([String: [Double]].self, forKey: .offsets)) ?? [:]
+        align = try? c.decode(Double.self, forKey: .align)
+        turn = (try? c.decode(Int.self, forKey: .turn)) ?? 0
+        est = (try? c.decode([String: RoomSel].self, forKey: .est)) ?? [:]
+        extras = (try? c.decode([ExtraLine].self, forKey: .extras)) ?? []
+        marginPct = (try? c.decode(Double.self, forKey: .marginPct)) ?? 10
+        vat = (try? c.decode(Bool.self, forKey: .vat)) ?? true
+    }
+    enum K: String, CodingKey { case name, addr, rooms, offsets, align, turn, est, extras, marginPct, vat }
+
+    /// 벽 방향(길이 가중) 으로 구한 정렬 각도: 이 각도만큼 돌리면 벽이 수평·수직이 됨
+    var autoAlign: Double {
+        var sx = 0.0, sy = 0.0
+        for r in rooms {
+            var a = r.rot
+            for w in r.walls {
+                let t = 4 * a * .pi / 180
+                sx += cos(t) * Double(w.len); sy += sin(t) * Double(w.len)
+                a += w.turnDeg
+            }
+        }
+        if sx == 0 && sy == 0 { return 0 }
+        return atan2(sy, sx) * 180 / .pi / 4
+    }
+    var viewAngle: Double { -(align ?? autoAlign) + Double(turn) * 90 }
+
+    /// 위치 보정 + 정렬을 적용한 방 (그림·내보내기는 모두 이것으로)
+    func placed(_ r: ScanRoom) -> ScanRoom {
+        let o = offsets[r.sessionId] ?? [0, 0]
+        let a = viewAngle * .pi / 180, c = cos(a), s = sin(a)
+        let x = r.x + o[0], y = r.y + o[1]
+        var q = r
+        q.x = x * c - y * s; q.y = x * s + y * c; q.rot = r.rot + viewAngle
+        return q
+    }
+    var placedRooms: [ScanRoom] { rooms.map(placed) }
 }
 
 let roomTypes = ["거실", "주방", "거실·주방", "안방", "작은방", "아이방", "드레스룸", "욕실", "현관", "다용도실", "발코니", "기타"]
@@ -92,12 +146,21 @@ func uid() -> String { String(UUID().uuidString.replacingOccurrences(of: "-", wi
 @MainActor
 final class Store: ObservableObject {
     @Published var site = Site() { didSet { save() } }
+    @Published var prices: [PriceItem] = defaultPrices { didSet { savePrices() } }
+    private var priceFile: URL { Store.docs.appendingPathComponent("prices.json") }
+    func savePrices() { if let d = try? JSONEncoder().encode(prices) { try? d.write(to: priceFile, options: .atomic) } }
 
     static var docs: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
     private var file: URL { Store.docs.appendingPathComponent("site.json") }
 
     init() {
         if let d = try? Data(contentsOf: file), let s = try? JSONDecoder().decode(Site.self, from: d) { site = s }
+        if let d = try? Data(contentsOf: priceFile), let p = try? JSONDecoder().decode([PriceItem].self, from: d) {
+            // 저장된 단가 + 새로 생긴 항목
+            var m = p
+            for q in defaultPrices where !m.contains(where: { $0.key == q.key }) { m.append(q) }
+            prices = m
+        }
     }
     func save() {
         if let d = try? JSONEncoder().encode(site) { try? d.write(to: file, options: .atomic) }
@@ -133,11 +196,11 @@ final class Store: ObservableObject {
     /// 안락실측 [백업 불러오기]용 JSON
     func exportAnrakJSON() -> URL? {
         let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
-        let rooms: [[String: Any]] = site.rooms.map { r in
-            let (dx, dy) = offset(for: r)
+        let rooms: [[String: Any]] = site.placedRooms.map { r in
+            let (dx, dy) = (0.0, 0.0)
             return [
                 "id": r.id, "name": r.name, "type": roomTypes.contains(r.name) ? r.name : "",
-                "ceil": r.ceil, "x": (r.x + dx).rounded(), "y": (r.y + dy).rounded(), "rot": r.rot,
+                "ceil": r.ceil, "x": (r.x + dx).rounded(), "y": (r.y + dy).rounded(), "rot": (r.rot * 10).rounded() / 10,
                 "floor": "oak", "wall": "white",
                 "walls": r.walls.map { w -> [String: Any] in
                     let turn: Any = (w.turn == "R" || w.turn == "L") ? w.turn : (Double(w.turn) ?? 0)

@@ -74,6 +74,8 @@ struct CaptureScreen: View {
     @Environment(\.dismiss) var dismiss
     @State private var name = "거실"
     @State private var saving = false
+    @AppStorage("lastMold") private var mold = "none"
+    @AppStorage("lastBase") private var base = 0
 
     var body: some View {
         ZStack {
@@ -125,6 +127,7 @@ struct CaptureScreen: View {
                     }
                 }
             }
+            FinishPicker(mold: $mold, base: $base)
             HStack(spacing: 10) {
                 Button { save(); dismiss() } label: {
                     Text("저장").fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 14)
@@ -151,6 +154,7 @@ struct CaptureScreen: View {
         if var r = RoomConverter.convert(room, name: name, sessionId: cc.sessionId, usdz: ok ? fileName : nil) {
             let rawName = "room_\(uid()).json"
             if let d = try? JSONEncoder().encode(room), (try? d.write(to: Store.docs.appendingPathComponent(rawName))) != nil { r.raw = rawName }
+            r.moldType = mold; r.moldH = moldHeight(mold); r.baseH = base
             store.add(r)
         } else {
             cc.error = "벽을 3개 이상 찾지 못했습니다. 다시 스캔해 주세요"

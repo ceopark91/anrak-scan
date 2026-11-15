@@ -13,13 +13,14 @@ targets:
     info:
       path: Resources/Info.plist
       properties:
-        CFBundleDisplayName: 안락 스캔
-        CFBundleShortVersionString: "1.0.0"
-        CFBundleVersion: "1"
+        CFBundleDisplayName: 안락 실측
+        CFBundleShortVersionString: "1.1.0"
+        CFBundleVersion: "2"
         UILaunchScreen: {}
         UIRequiredDeviceCapabilities: [arkit]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        NSCameraUsageDescription: 라이다·카메라로 방을 스캔해 도면을 만듭니다.
+        NSCameraUsageDescription: 라이다·카메라로 방을 스캔하고 치수를 잽니다.
+        NSPhotoLibraryUsageDescription: 도면 사진을 불러옵니다.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
     settings:
