@@ -1,0 +1,28 @@
+name: 안락 스캔 빌드
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode 선택
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app || true; xcodebuild -version
+      - name: 프로젝트 만들기
+        run: brew install xcodegen && xcodegen generate
+      - name: 빌드 (서명 없이)
+        run: |
+          xcodebuild -project AnrakScan.xcodeproj -scheme AnrakScan -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build | tail -40
+          test -d build/Build/Products/Release-iphoneos/AnrakScan.app
+      - name: IPA 묶기
+        run: |
+          mkdir -p Payload && cp -R build/Build/Products/Release-iphoneos/AnrakScan.app Payload/
+          zip -qry AnrakScan.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AnrakScan-ipa
+          path: AnrakScan.ipa
