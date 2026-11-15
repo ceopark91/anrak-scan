@@ -60,6 +60,8 @@ struct ScanRoom: Codable, Identifiable, Hashable {
         let r = rot * .pi / 180, c = cos(r), s = sin(r)
         return CGPoint(x: p.x * c - p.y * s + x + dx, y: p.x * s + p.y * c + y + dy)
     }
+    /// 벽을 다 돌고 났을 때 시작점과 어긋난 거리(mm)
+    var gap: Int { let p = localPoints(); guard let l = p.last else { return 0 }; return Int(hypot(l.x, l.y).rounded()) }
     var area: Double {   // ㎡
         let p = localPoints(); let n = walls.count
         guard n >= 3 else { return 0 }
@@ -83,7 +85,8 @@ struct ScanRoom: Codable, Identifiable, Hashable {
     }
 }
 
-struct Site: Codable {
+struct Site: Codable, Identifiable {
+    var id: String = uid()
     var name: String = ""
     var addr: String = ""
     var rooms: [ScanRoom] = []
@@ -98,6 +101,7 @@ struct Site: Codable {
     init() {}
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: K.self)
+        id = (try? c.decode(String.self, forKey: .id)) ?? uid()
         name = (try? c.decode(String.self, forKey: .name)) ?? ""
         addr = (try? c.decode(String.self, forKey: .addr)) ?? ""
         rooms = (try? c.decode([ScanRoom].self, forKey: .rooms)) ?? []
@@ -109,7 +113,7 @@ struct Site: Codable {
         marginPct = (try? c.decode(Double.self, forKey: .marginPct)) ?? 10
         vat = (try? c.decode(Bool.self, forKey: .vat)) ?? true
     }
-    enum K: String, CodingKey { case name, addr, rooms, offsets, align, turn, est, extras, marginPct, vat }
+    enum K: String, CodingKey { case id, name, addr, rooms, offsets, align, turn, est, extras, marginPct, vat }
 
     /// 벽 방향(길이 가중) 으로 구한 정렬 각도: 이 각도만큼 돌리면 벽이 수평·수직이 됨
     var autoAlign: Double {
@@ -155,6 +159,7 @@ final class Store: ObservableObject {
 
     init() {
         if let d = try? Data(contentsOf: file), let s = try? JSONDecoder().decode(Site.self, from: d) { site = s }
+        if let d = try? Data(contentsOf: othersFile), let o = try? JSONDecoder().decode([Site].self, from: d) { others = o }
         if let d = try? Data(contentsOf: priceFile), let p = try? JSONDecoder().decode([PriceItem].self, from: d) {
             // 저장된 단가 + 새로 생긴 항목
             var m = p
@@ -164,6 +169,23 @@ final class Store: ObservableObject {
     }
     func save() {
         if let d = try? JSONEncoder().encode(site) { try? d.write(to: file, options: .atomic) }
+    }
+
+    // 다른 현장들 (지금 열어 둔 현장은 site)
+    @Published var others: [Site] = [] { didSet { saveOthers() } }
+    private var othersFile: URL { Store.docs.appendingPathComponent("others.json") }
+    func saveOthers() { if let d = try? JSONEncoder().encode(others) { try? d.write(to: othersFile, options: .atomic) } }
+    func newSite() { others.insert(site, at: 0); site = Site() }
+    func open(_ id: String) {
+        guard let i = others.firstIndex(where: { $0.id == id }) else { return }
+        let next = others[i]
+        var o = others; o.remove(at: i); o.insert(site, at: 0)
+        others = o; site = next
+    }
+    /// 지금 현장을 지우고 다른 현장(없으면 빈 현장)을 연다
+    func deleteCurrentSite() {
+        for r in site.rooms { for f in [r.usdz, r.raw].compactMap({ $0 }) { try? FileManager.default.removeItem(at: Store.docs.appendingPathComponent(f)) } }
+        if others.isEmpty { site = Site() } else { var o = others; let next = o.removeFirst(); others = o; site = next }
     }
 
     func offset(for r: ScanRoom) -> (Double, Double) {

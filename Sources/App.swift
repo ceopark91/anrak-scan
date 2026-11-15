@@ -110,12 +110,31 @@ struct PlanTab: View {
     @State private var edit: IdString?
     @State private var importing = false
     @State private var message: String?
+    @State private var confirmSiteDelete = false
+    @State private var zoomPlan = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("ANRAK").font(.caption.weight(.semibold)).tracking(2).foregroundStyle(.secondary)
+                    HStack {
+                        Text("ANRAK").font(.caption.weight(.semibold)).tracking(2).foregroundStyle(.secondary)
+                        Spacer()
+                        Menu {
+                            Button { store.newSite() } label: { Label("새 현장", systemImage: "plus") }
+                            if !store.others.isEmpty {
+                                Section("다른 현장 열기") {
+                                    ForEach(store.others) { o in
+                                        Button("\(o.name.isEmpty ? "이름 없는 현장" : o.name) · 방 \(o.rooms.count)") { store.open(o.id) }
+                                    }
+                                }
+                            }
+                            Button(role: .destructive) { confirmSiteDelete = true } label: { Label("이 현장 삭제", systemImage: "trash") }
+                        } label: {
+                            Label("현장 \(store.others.count + 1)", systemImage: "folder").font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 12).padding(.vertical, 7).background(Color.white, in: Capsule())
+                        }.foregroundStyle(.black)
+                    }
                     TextField("현장 이름 (예: 장현호반 1209-202)", text: $store.site.name).font(.title2.weight(.bold))
                     TextField("주소", text: $store.site.addr).font(.subheadline).foregroundStyle(.secondary)
                 }
@@ -135,6 +154,8 @@ struct PlanTab: View {
                         }.frame(maxWidth: .infinity, minHeight: 220)
                     } else {
                         PlanCanvas(rooms: store.site.placedRooms, ceiling: mode == 1).frame(height: 320)
+                            .contentShape(Rectangle()).onTapGesture { zoomPlan = true }
+                        Text("도면을 누르면 크게 봅니다").font(.caption2).foregroundStyle(.secondary)
                     }
                 }
 
@@ -183,6 +204,10 @@ struct PlanTab: View {
             if rooms.isEmpty { message = "이 파일에서 닫힌 방 윤곽(폴리라인)을 찾지 못했습니다. 캐드에서 방마다 닫힌 폴리라인으로 그린 뒤 DXF로 저장해 주세요." }
             else { message = nil; for r in rooms { store.add(r) } }
         }
+        .fullScreenCover(isPresented: $zoomPlan) { PlanZoom(rooms: store.site.placedRooms, ceiling: mode == 1) }
+        .confirmationDialog("이 현장과 안의 방을 모두 지울까요?", isPresented: $confirmSiteDelete, titleVisibility: .visible) {
+            Button("현장 삭제", role: .destructive) { store.deleteCurrentSite() }
+        }
         .confirmationDialog("이 방을 지울까요?", isPresented: Binding(get: { confirmDelete != nil }, set: { if !$0 { confirmDelete = nil } }), titleVisibility: .visible) {
             Button("방 삭제", role: .destructive) { if let r = confirmDelete { store.delete(r) }; confirmDelete = nil }
         }
@@ -195,6 +220,7 @@ struct PlanTab: View {
                 Text(r.name).font(.headline)
                 Text("바닥 \(String(format: "%.1f", r.area))㎡ (\(String(format: "%.1f", r.area / Calc.py))평) · 천장 높이 \(mm(r.ceil))").font(.subheadline)
                 Text("천장 \(mm(cw)) × \(mm(cd)) · 둘레 \(String(format: "%.1f", Double(r.perimeter) / 1000))m").font(.subheadline).foregroundStyle(.secondary)
+                if r.gap > 60 { Text("벽 길이가 서로 안 맞습니다 (끝점 \(mm(r.gap))mm 어긋남)").font(.caption).foregroundStyle(.red) }
                 Text("몰딩 \(moldName(r.moldType)) · 걸레받이 \((r.baseH ?? 0) == 0 ? "없음" : "\(r.baseH ?? 0)mm") · 도배 높이 \(mm(r.paperH))")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -267,5 +293,46 @@ struct PlanCanvas: View {
                     .font(.system(size: fs)).foregroundColor(.secondary), at: CGPoint(x: cx, y: cy + 7))
             }
         }
+    }
+}
+
+/// 도면 크게 보기: 두 손가락으로 확대, 끌어서 이동
+struct PlanZoom: View {
+    let rooms: [ScanRoom]
+    let ceiling: Bool
+    @Environment(\.dismiss) var dismiss
+    @State private var scale: CGFloat = 1
+    @State private var last: CGFloat = 1
+    @State private var off: CGSize = .zero
+    @State private var lastOff: CGSize = .zero
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button { dismiss() } label: { Label("닫기", systemImage: "chevron.left").fontWeight(.semibold) }
+                Spacer()
+                Text(ceiling ? "천장도" : "평면도").font(.headline)
+                Spacer()
+                Button("맞춤") { scale = 1; last = 1; off = .zero; lastOff = .zero }.fontWeight(.semibold)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 12).foregroundStyle(.black)
+            GeometryReader { geo in
+                PlanCanvas(rooms: rooms, ceiling: ceiling, fontScale: 1.1 / max(1, Double(scale) * 0.6))
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .scaleEffect(scale).offset(off)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { v in scale = min(8, max(1, last * v)) }
+                            .onEnded { _ in last = scale }
+                            .simultaneously(with: DragGesture()
+                                .onChanged { v in off = CGSize(width: lastOff.width + v.translation.width, height: lastOff.height + v.translation.height) }
+                                .onEnded { _ in lastOff = off })
+                    )
+            }
+            .clipped()
+            Text("두 손가락으로 확대 · 끌어서 이동").font(.caption).foregroundStyle(.secondary).padding(8)
+        }
+        .background(Color.white)
     }
 }

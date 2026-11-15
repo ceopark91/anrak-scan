@@ -51,6 +51,7 @@ struct RoomEditSheet: View {
     @State private var base = 0
     @State private var ceil = 2300
     @State private var measure: IdString?
+    @State private var walls: [AWall] = []
 
     var body: some View {
         NavigationStack {
@@ -68,6 +69,33 @@ struct RoomEditSheet: View {
                     Text("라이다 스캔은 몰딩·걸레받이를 따로 못 잡습니다. [재기]로 카메라 자를 써서 잰 값을 넣으면 도배 높이에서 빠지고, 견적의 몰딩·걸레받이에도 반영됩니다. 걸레받이가 없으면 0.")
                 }
                 Section("천장 높이") { measureRow("바닥~천장", $ceil, "ceil") }
+                Section {
+                    ForEach(walls.indices, id: \.self) { i in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack {
+                                Text("벽 \(i + 1)").fontWeight(.semibold)
+                                Spacer()
+                                TextField("0", value: $walls[i].len, format: .number).keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 80)
+                                Text("mm").foregroundStyle(.secondary)
+                                Menu {
+                                    Button("문 추가") { walls[i].ops.append(AOp(id: uid(), kind: "door", off: max(0, walls[i].len / 2 - 450), w: 900, h: 2100, sill: 0)) }
+                                    Button("창 추가") { walls[i].ops.append(AOp(id: uid(), kind: "window", off: max(0, walls[i].len / 2 - 600), w: 1200, h: 1200, sill: 900)) }
+                                } label: { Image(systemName: "plus.circle") }
+                            }
+                            ForEach(walls[i].ops.indices, id: \.self) { k in
+                                HStack(spacing: 6) {
+                                    Text(walls[i].ops[k].kind == "door" ? "문" : "창").font(.caption.weight(.semibold)).frame(width: 18)
+                                    opField("위치", $walls[i].ops[k].off); opField("폭", $walls[i].ops[k].w)
+                                    opField("높이", $walls[i].ops[k].h); opField("턱", $walls[i].ops[k].sill)
+                                    Button { walls[i].ops.remove(at: k) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Color(white: 0.7)) }
+                                        .buttonStyle(.borderless)
+                                }
+                            }
+                        }
+                    }
+                } header: { Text("벽 · 문 · 창 (줄자로 잰 값으로 고치기)") } footer: {
+                    Text("벽 1부터 시계 방향입니다. 위치는 벽 시작점에서 문·창 왼쪽 끝까지, 턱은 바닥에서 창 아래까지입니다.")
+                }
             }
             .navigationTitle("방 정보").navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -76,7 +104,7 @@ struct RoomEditSheet: View {
             }
             .onAppear {
                 if let r = store.site.rooms.first(where: { $0.id == roomId }) {
-                    name = r.name; mold = r.moldType ?? "none"; moldH = r.moldH ?? 0; base = r.baseH ?? 0; ceil = r.ceil
+                    name = r.name; mold = r.moldType ?? "none"; moldH = r.moldH ?? 0; base = r.baseH ?? 0; ceil = r.ceil; walls = r.walls
                 }
             }
             .fullScreenCover(item: $measure) { m in
@@ -95,10 +123,17 @@ struct RoomEditSheet: View {
             Button("재기") { measure = IdString(id: key) }.buttonStyle(.bordered)
         }
     }
+    func opField(_ title: String, _ v: Binding<Int>) -> some View {
+        VStack(spacing: 0) {
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+            TextField("0", value: v, format: .number).keyboardType(.numberPad).multilineTextAlignment(.center).font(.footnote)
+        }
+    }
     func save() {
         guard let i = store.site.rooms.firstIndex(where: { $0.id == roomId }) else { return }
         var r = store.site.rooms[i]
         r.name = name.isEmpty ? r.name : name
+        if walls.count == r.walls.count, walls.allSatisfy({ $0.len > 0 }) { r.walls = walls }
         r.moldType = mold; r.moldH = mold == "none" ? 0 : moldH; r.baseH = max(0, base)
         if ceil > 1500, ceil < 6000 { r.ceil = ceil }
         store.site.rooms[i] = r
