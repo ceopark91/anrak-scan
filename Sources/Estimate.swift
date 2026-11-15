@@ -200,7 +200,14 @@ enum Calc {
         }
         // 몰딩 (둘레 + 10%)
         let per = Double(r.perimeter) / 1000
-        let doorW = Double(r.walls.flatMap { $0.ops }.filter { $0.kind == "door" }.reduce(0) { $0 + $1.w }) / 1000
+        let allOps: [AOp] = r.walls.flatMap { $0.ops }
+        var doorMM = 0
+        var winArea = 0.0
+        for o in allOps {
+            if o.kind == "door" { doorMM += o.w }
+            if o.kind == "window" { winArea += Double(o.w) * Double(o.h) / 1_000_000 }
+        }
+        let doorW = Double(doorMM) / 1000
         if ["flat", "step", "minus"].contains(s.mold) {
             add("mold_" + s.mold, (per * 1.1 * 10).rounded() / 10, "둘레 \(String(format: "%.2f", per))m + 10%")
         }
@@ -209,8 +216,7 @@ enum Calc {
         add("door_new", Double(s.doorNew), "")
         add("door_film", Double(s.doorFilm), "")
         if s.sash {
-            let a = r.walls.flatMap { $0.ops }.filter { $0.kind == "window" }.reduce(0.0) { $0 + Double($1.w * $1.h) / 1_000_000 }
-            add("window_sash", (a * 10).rounded() / 10, "스캔한 창 넓이 합")
+            add("window_sash", (winArea * 10).rounded() / 10, "스캔한 창 넓이 합")
         }
         add("light", Double(s.lights), "")
         add("outlet", Double(s.outlets), "")
