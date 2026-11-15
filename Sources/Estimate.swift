@@ -187,7 +187,8 @@ enum Calc {
         // 천장
         if let sp = paperSpec(s.ceil) {
             let st = ceilStrips(r, width: sp.width)
-            add(sp.key, Double(rolls(st, rollLen: sp.roll)), "\(st.count)장 × \(mm(st.first ?? 0))", tag: ".c")
+            let fx = (r.fixtures ?? []).count
+            add(sp.key, Double(rolls(st, rollLen: sp.roll)), "\(st.count)장 × \(mm(st.first ?? 0))" + (fx > 0 ? " · 천장 기물 \(fx)개 따내기" : ""), tag: ".c")
         } else if s.ceil == "paint" {
             add("paint", (ceilArea * 10).rounded() / 10, "천장 면적", tag: ".c")
         }
@@ -218,7 +219,8 @@ enum Calc {
         if s.sash {
             add("window_sash", (winArea * 10).rounded() / 10, "스캔한 창 넓이 합")
         }
-        add("light", Double(s.lights), "")
+        let lightN = r.count("light") + r.count("down")
+        add("light", Double(s.lights > 0 ? s.lights : lightN), s.lights > 0 ? "" : "스캔에서 찍은 조명 \(lightN)개")
         add("outlet", Double(s.outlets), "")
         if s.demo { add("demo", (ceilArea * 10).rounded() / 10, "바닥 면적") }
         return out

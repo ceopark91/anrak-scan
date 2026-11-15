@@ -181,6 +181,11 @@ enum Exporter {
                     line(p0, q0, layer); line(q0, q1, layer); line(q1, p1, layer)
                 }
             }
+            for fx in r.fixtures ?? [] {
+                let c = r.toPlan(CGPoint(x: fx.x, y: fx.y))
+                s += "0\nCIRCLE\n8\nFIXTURE\n10\n\(f(c.x))\n20\n\(f(-c.y))\n40\n\(fx.kind == "aircon" ? "300.0" : "100.0")\n"
+                text(CGPoint(x: c.x, y: c.y + 220), fixtureName(fx.kind), 60, "FIXTURE")
+            }
             text(CGPoint(x: cx, y: cy - 120), r.name, 150, "TEXT")
             text(CGPoint(x: cx, y: cy + 120), String(format: "%.1fm2 H%d", r.area, r.ceil), 90, "TEXT")
         }

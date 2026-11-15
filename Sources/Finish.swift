@@ -52,6 +52,7 @@ struct RoomEditSheet: View {
     @State private var ceil = 2300
     @State private var measure: IdString?
     @State private var walls: [AWall] = []
+    @State private var fixtures: [Fixture] = []
 
     var body: some View {
         NavigationStack {
@@ -69,6 +70,17 @@ struct RoomEditSheet: View {
                     Text("라이다 스캔은 몰딩·걸레받이를 따로 못 잡습니다. [재기]로 카메라 자를 써서 잰 값을 넣으면 도배 높이에서 빠지고, 견적의 몰딩·걸레받이에도 반영됩니다. 걸레받이가 없으면 0.")
                 }
                 Section("천장 높이") { measureRow("바닥~천장", $ceil, "ceil") }
+                Section {
+                    ForEach(fixtureKinds, id: \.0) { k in
+                        let n = fixtures.filter { $0.kind == k.0 }.count
+                        Stepper(value: Binding(get: { n }, set: { v in
+                            if v > n { for _ in n..<v { fixtures.append(Fixture(id: uid(), kind: k.0, x: Double(walls.first?.len ?? 2000) / 2, y: 600)) } }
+                            else if v < n { for _ in v..<n { if let i = fixtures.lastIndex(where: { $0.kind == k.0 }) { fixtures.remove(at: i) } } }
+                        }), in: 0...40) { Text("\(k.1)  \(n)") }
+                    }
+                } header: { Text("천장 기물") } footer: {
+                    Text("스캔 중 천장을 가리키고 눌러 찍은 것은 위치까지 도면에 나옵니다. 여기서 늘린 것은 개수만 셉니다(견적 조명 수량에 반영).")
+                }
                 Section {
                     ForEach(walls.indices, id: \.self) { i in
                         VStack(alignment: .leading, spacing: 6) {
@@ -104,7 +116,7 @@ struct RoomEditSheet: View {
             }
             .onAppear {
                 if let r = store.site.rooms.first(where: { $0.id == roomId }) {
-                    name = r.name; mold = r.moldType ?? "none"; moldH = r.moldH ?? 0; base = r.baseH ?? 0; ceil = r.ceil; walls = r.walls
+                    name = r.name; mold = r.moldType ?? "none"; moldH = r.moldH ?? 0; base = r.baseH ?? 0; ceil = r.ceil; walls = r.walls; fixtures = r.fixtures ?? []
                 }
             }
             .fullScreenCover(item: $measure) { m in
@@ -134,6 +146,7 @@ struct RoomEditSheet: View {
         var r = store.site.rooms[i]
         r.name = name.isEmpty ? r.name : name
         if walls.count == r.walls.count, walls.allSatisfy({ $0.len > 0 }) { r.walls = walls }
+        r.fixtures = fixtures
         r.moldType = mold; r.moldH = mold == "none" ? 0 : moldH; r.baseH = max(0, base)
         if ceil > 1500, ceil < 6000 { r.ceil = ceil }
         store.site.rooms[i] = r

@@ -11,6 +11,17 @@ struct AOp: Codable, Identifiable, Hashable {
     var sill: Int      // 바닥에서 아래 끝까지(mm)
 }
 
+/// 천장 기물 (조명·에어컨 등). x, y = 방 좌표(mm, 첫 모서리 기준)
+struct Fixture: Codable, Hashable, Identifiable {
+    var id: String
+    var kind: String
+    var x: Double
+    var y: Double
+}
+let fixtureKinds: [(String, String)] = [("light", "조명"), ("down", "매입등"), ("aircon", "천장 에어컨"), ("sprinkler", "스프링클러"),
+                                        ("detector", "화재감지기"), ("vent", "환기구"), ("hatch", "점검구"), ("etc", "기타")]
+func fixtureName(_ k: String) -> String { fixtureKinds.first { $0.0 == k }?.1 ?? "기타" }
+
 struct AWall: Codable, Hashable {
     var len: Int
     var turn: String   // "R", "L" 또는 "123.4"
@@ -36,6 +47,7 @@ struct ScanRoom: Codable, Identifiable, Hashable {
     var walls: [AWall]
     var usdz: String?      // Documents 안 파일 이름
     var raw: String? = nil  // RoomPlan 원본(CapturedRoom JSON) 파일 이름 → STL
+    var fixtures: [Fixture]? = nil  // 천장 기물
     var moldType: String? = nil   // 현재 천장 몰딩: none, flat, step, minus
     var moldH: Int? = nil         // 몰딩 높이(mm)
     var baseH: Int? = nil         // 현재 걸레받이 높이(mm), 0이면 없음
@@ -55,6 +67,13 @@ struct ScanRoom: Codable, Identifiable, Hashable {
         }
         return pts
     }
+    /// 도면 좌표 → 방 좌표 (toPlan의 반대)
+    func toLocal(_ p: CGPoint) -> CGPoint {
+        let r = -rot * .pi / 180, c = cos(r), s = sin(r)
+        let dx = p.x - x, dy = p.y - y
+        return CGPoint(x: dx * c - dy * s, y: dx * s + dy * c)
+    }
+    func count(_ kind: String) -> Int { (fixtures ?? []).filter { $0.kind == kind }.count }
     /// 방 좌표 → 도면 좌표 (안락실측 xf())
     func toPlan(_ p: CGPoint, dx: Double = 0, dy: Double = 0) -> CGPoint {
         let r = rot * .pi / 180, c = cos(r), s = sin(r)

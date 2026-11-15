@@ -18,6 +18,29 @@ final class CaptureController: NSObject, ObservableObject, RoomCaptureViewDelega
     @Published var scanning = false
     @Published var processing = false
     @Published var result: CapturedRoom?
+    @Published var marks: [(String, simd_float3)] = []   // 스캔 중 찍은 천장 기물 (세계 좌표)
+    @Published var markMsg: String?
+
+    /// 화면 가운데가 가리키는 곳(천장 등)의 세계 좌표
+    func hitCenter() -> simd_float3? {
+        guard let f = arSession.currentFrame else { return nil }
+        let t = f.camera.transform
+        let origin = simd_float3(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+        let dir = -simd_normalize(simd_float3(t.columns.2.x, t.columns.2.y, t.columns.2.z))
+        for target in [ARRaycastQuery.Target.existingPlaneGeometry, .estimatedPlane] {
+            let q = ARRaycastQuery(origin: origin, direction: dir, allowing: target, alignment: .any)
+            if let r = arSession.raycast(q).first {
+                let p = r.worldTransform.columns.3
+                return simd_float3(p.x, p.y, p.z)
+            }
+        }
+        return nil
+    }
+    func mark(_ kind: String) {
+        if let p = hitCenter() {
+            marks.append((kind, p)); markMsg = "\(fixtureName(kind)) 표시함 (\(marks.count)개)"
+        } else { markMsg = "천장을 못 찾았습니다. 조금 더 비춘 뒤 다시" }
+    }
     @Published var error: String?
     @Published var hint = "천천히 방을 한 바퀴 돌며 벽·바닥·천장 모서리를 비춰 주세요"
 
@@ -26,7 +49,7 @@ final class CaptureController: NSObject, ObservableObject, RoomCaptureViewDelega
     func encode(with coder: NSCoder) {}
 
     func start() {
-        result = nil; error = nil; processing = false; scanning = true
+        result = nil; error = nil; processing = false; scanning = true; marks = []; markMsg = nil
         view.captureSession.run(configuration: RoomCaptureSession.Configuration())
     }
     func finish() {
@@ -80,6 +103,7 @@ struct CaptureScreen: View {
     var body: some View {
         ZStack {
             CaptureRepresentable().ignoresSafeArea()
+            if cc.scanning { Image(systemName: "plus").font(.system(size: 28, weight: .light)).foregroundStyle(.white).shadow(radius: 2) }
             VStack(spacing: 0) {
                 HStack {
                     Button("취소") { cc.cancel(); dismiss() }
@@ -101,6 +125,23 @@ struct CaptureScreen: View {
                         .padding(.top, 12)
                 }
                 Spacer()
+                if cc.scanning {
+                    VStack(spacing: 8) {
+                        if let m = cc.markMsg { Text(m).font(.caption).foregroundStyle(.white).padding(6).background(.black.opacity(0.55), in: Capsule()) }
+                        Text("천장 기물: 가운데 + 를 맞추고 누르기").font(.caption).foregroundStyle(.white)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(fixtureKinds, id: \.0) { k in
+                                    Button(k.1) { cc.mark(k.0) }
+                                        .font(.subheadline.weight(.semibold))
+                                        .padding(.horizontal, 12).padding(.vertical, 9)
+                                        .background(Color.white.opacity(0.92), in: Capsule()).foregroundStyle(.black)
+                                }
+                            }.padding(.horizontal, 12)
+                        }
+                    }
+                    .padding(.bottom, 24)
+                }
                 if cc.processing {
                     ProgressView("도면으로 정리하는 중…").padding(20)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
@@ -155,6 +196,10 @@ struct CaptureScreen: View {
             let rawName = "room_\(uid()).json"
             if let d = try? JSONEncoder().encode(room), (try? d.write(to: Store.docs.appendingPathComponent(rawName))) != nil { r.raw = rawName }
             r.moldType = mold; r.moldH = moldHeight(mold); r.baseH = base
+            r.fixtures = cc.marks.map { m in
+                let q = r.toLocal(CGPoint(x: Double(m.1.x) * 1000, y: Double(m.1.z) * 1000))
+                return Fixture(id: uid(), kind: m.0, x: q.x.rounded(), y: q.y.rounded())
+            }
             store.add(r)
         } else {
             cc.error = "벽을 3개 이상 찾지 못했습니다. 다시 스캔해 주세요"

@@ -220,6 +220,9 @@ struct PlanTab: View {
                 Text(r.name).font(.headline)
                 Text("바닥 \(String(format: "%.1f", r.area))㎡ (\(String(format: "%.1f", r.area / Calc.py))평) · 천장 높이 \(mm(r.ceil))").font(.subheadline)
                 Text("천장 \(mm(cw)) × \(mm(cd)) · 둘레 \(String(format: "%.1f", Double(r.perimeter) / 1000))m").font(.subheadline).foregroundStyle(.secondary)
+                if !(r.fixtures ?? []).isEmpty {
+                    Text("천장: " + fixtureKinds.compactMap { k in r.count(k.0) > 0 ? "\(k.1) \(r.count(k.0))" : nil }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                }
                 if r.gap > 60 { Text("벽 길이가 서로 안 맞습니다 (끝점 \(mm(r.gap))mm 어긋남)").font(.caption).foregroundStyle(.red) }
                 Text("몰딩 \(moldName(r.moldType)) · 걸레받이 \((r.baseH ?? 0) == 0 ? "없음" : "\(r.baseH ?? 0)mm") · 도배 높이 \(mm(r.paperH))")
                     .font(.caption).foregroundStyle(.secondary)
@@ -279,6 +282,25 @@ struct PlanCanvas: View {
                             ctx.stroke(seg, with: .color(op.kind == "door" ? Color(red: 0.62, green: 0.45, blue: 0.30) : Color(red: 0.35, green: 0.62, blue: 0.85)), lineWidth: 5)
                         }
                     }
+                }
+                for fx in r.fixtures ?? [] {
+                    let c = S(r.toPlan(CGPoint(x: fx.x, y: fx.y)))
+                    let rr = ceiling ? 6.0 : 3.5
+                    let box = CGRect(x: c.x - rr, y: c.y - rr, width: rr * 2, height: rr * 2)
+                    let col = Color(red: 0.85, green: 0.55, blue: 0.10)
+                    switch fx.kind {
+                    case "light", "down":
+                        ctx.fill(Path(ellipseIn: box), with: .color(.white)); ctx.stroke(Path(ellipseIn: box), with: .color(col), lineWidth: 1.5)
+                        var x = Path(); x.move(to: CGPoint(x: box.minX + 1.5, y: box.minY + 1.5)); x.addLine(to: CGPoint(x: box.maxX - 1.5, y: box.maxY - 1.5))
+                        x.move(to: CGPoint(x: box.maxX - 1.5, y: box.minY + 1.5)); x.addLine(to: CGPoint(x: box.minX + 1.5, y: box.maxY - 1.5))
+                        if fx.kind == "light" { ctx.stroke(x, with: .color(col), lineWidth: 1) }
+                    case "aircon", "hatch", "vent":
+                        let b2 = box.insetBy(dx: fx.kind == "aircon" ? -3 : 0, dy: fx.kind == "aircon" ? -3 : 0)
+                        ctx.fill(Path(b2), with: .color(.white)); ctx.stroke(Path(b2), with: .color(.blue), lineWidth: 1.5)
+                    default:
+                        ctx.fill(Path(ellipseIn: box.insetBy(dx: 1.5, dy: 1.5)), with: .color(.red))
+                    }
+                    if ceiling { ctx.draw(Text(fixtureName(fx.kind)).font(.system(size: fs * 0.85)).foregroundColor(.secondary), at: CGPoint(x: c.x, y: c.y + rr + 6)) }
                 }
                 let cx = pp.prefix(n).map { $0.x }.reduce(0, +) / Double(n), cy = pp.prefix(n).map { $0.y }.reduce(0, +) / Double(n)
                 for i in 0..<n where Double(r.walls[i].len) * sc > 26 {
