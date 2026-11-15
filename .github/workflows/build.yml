@@ -3,6 +3,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   ipa:
     runs-on: macos-15
@@ -26,3 +28,9 @@ jobs:
         with:
           name: AnrakScan-ipa
           path: AnrakScan.ipa
+      - name: 최신 설치 파일 올리기 (Releases)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest -y --cleanup-tag || true
+          gh release create latest AnrakScan.ipa --title "안락 스캔 최신 빌드" --notes "빌드 ${{ github.run_number }} · $(git rev-parse --short HEAD)" --latest
