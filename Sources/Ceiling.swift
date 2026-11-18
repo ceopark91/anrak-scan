@@ -172,7 +172,7 @@ struct CeilingScreen: View {
                         Text("벽 \(x.moldDrop) · 천장 \(x.moldProj)").font(.caption).foregroundStyle(.secondary).padding(.bottom, 10)
                     }
                 }
-                HStack { num("걸레받이 높이", bind(\.bb, 80)); num("걸레받이 두께", bind(\.bbT, 9)); num("천장고", bind(\.ceil, 2300)) }
+                HStack { num("걸레받이 높이", bind(\.bb!, 80)); num("걸레받이 두께", bind(\.bbT!, 9)); num("천장고", bind(\.ceil, 2300)) }
                 Text("도배 높이 \(mm(paper(x)))mm 자동 계산").font(.subheadline.weight(.semibold))
                 HStack(spacing: 6) {
                     Text("천장").font(.caption).foregroundStyle(.secondary).frame(width: 44, alignment: .leading)
