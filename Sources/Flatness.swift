@@ -10,7 +10,10 @@ final class FlatController: NSObject, ObservableObject, ARSessionDelegate {
     let view = ARSCNView(frame: .zero)
     @Published var dist: Double = 0          // 화면 가운데까지 거리(m)
     @Published var result: UIImage?
-    @Published var maxIn = 0.0, maxOut = 0.0, rms = 0.0, area = 0.0
+    @Published var maxIn = 0.0
+    @Published var maxOut = 0.0
+    @Published var rms = 0.0
+    @Published var area = 0.0
     @Published var busy = false
     private var last: ARFrame?
     private let ci = CIContext()
