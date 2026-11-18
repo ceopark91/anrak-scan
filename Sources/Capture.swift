@@ -99,6 +99,9 @@ struct CaptureScreen: View {
     @State private var saving = false
     @AppStorage("lastMold") private var mold = "none"
     @AppStorage("lastBase") private var base = 0
+    @AppStorage("quickScan") private var quick = true   // 연속 스캔: 방 이름은 나중에
+    @State private var endAll = false
+    @State private var savedCount = 0
 
     var body: some View {
         ZStack {
@@ -111,13 +114,34 @@ struct CaptureScreen: View {
                         .background(.ultraThinMaterial, in: Capsule())
                     Spacer()
                     if cc.scanning {
-                        Button("다 찍었어요") { cc.finish() }
-                            .fontWeight(.semibold)
-                            .padding(.horizontal, 18).padding(.vertical, 10)
-                            .background(Color.white, in: Capsule()).foregroundStyle(.black)
+                        if quick {
+                            Button("다음 방") { endAll = false; cc.finish() }
+                                .fontWeight(.semibold)
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                                .background(Color.white, in: Capsule()).foregroundStyle(.black)
+                            Button("전부 끝") { endAll = true; cc.finish() }
+                                .fontWeight(.semibold)
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                                .background(Color.black, in: Capsule()).foregroundStyle(.white)
+                        } else {
+                            Button("다 찍었어요") { cc.finish() }
+                                .fontWeight(.semibold)
+                                .padding(.horizontal, 18).padding(.vertical, 10)
+                                .background(Color.white, in: Capsule()).foregroundStyle(.black)
+                        }
                     }
                 }
                 .padding(.horizontal, 16).padding(.top, 8)
+                if cc.scanning && savedCount == 0 && cc.marks.isEmpty {
+                    Toggle("연속 스캔 (방 이름은 나중에)", isOn: $quick).font(.caption).foregroundStyle(.white)
+                        .padding(.horizontal, 14).padding(.vertical, 6)
+                        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 10))
+                        .padding(.horizontal, 40).padding(.top, 10)
+                }
+                if cc.scanning && savedCount > 0 {
+                    Text("방 \(savedCount)개 저장됨 · 다음 방으로 걸어가며 계속 비추세요").font(.caption.weight(.semibold)).foregroundStyle(.black)
+                        .padding(.horizontal, 12).padding(.vertical, 6).background(Color.white, in: Capsule()).padding(.top, 10)
+                }
                 if cc.scanning {
                     Text(cc.hint).font(.subheadline).foregroundStyle(.white)
                         .padding(.horizontal, 14).padding(.vertical, 8)
@@ -147,11 +171,17 @@ struct CaptureScreen: View {
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
                         .padding(.bottom, 40)
                 }
-                if cc.result != nil { savePanel }
+                if cc.result != nil && !quick { savePanel }
                 if let e = cc.error { Text(e).foregroundStyle(.red).padding().background(.white) }
             }
         }
-        .onAppear { cc.start() }
+        .onAppear { savedCount = 0; cc.start() }
+        .onChange(of: cc.result != nil) { _, has in
+            guard has, quick else { return }
+            name = "방 \(store.site.rooms.count + 1)"
+            save(); savedCount += 1
+            if endAll { dismiss() } else { cc.start() }
+        }
         .navigationBarHidden(true)
     }
 

@@ -112,6 +112,7 @@ struct PlanTab: View {
     @State private var message: String?
     @State private var confirmSiteDelete = false
     @State private var zoomPlan = false
+    @State private var building3D = false
 
     var body: some View {
         ScrollView {
@@ -180,6 +181,17 @@ struct PlanTab: View {
                     HStack(spacing: 10) {
                         BigButton(title: "도면 PDF", icon: "doc.richtext", dark: false) { share = Exporter.planPDF(store.site) }
                         BigButton(title: "캐드 DXF", icon: "square.and.pencil", dark: false) { share = Exporter.dxf(store.site) }
+                    }
+                    if store.site.rooms.contains(where: { $0.raw != nil }) {
+                        BigButton(title: building3D ? "3D 합치는 중…" : "집 전체 3D 보기", icon: "house", dark: true) {
+                            guard !building3D else { return }
+                            building3D = true
+                            Task {
+                                let (u, note) = await House3D.build(store.site)
+                                building3D = false; message = note
+                                if let u { preview = u }
+                            }
+                        }
                     }
                     HStack(spacing: 10) {
                         BigButton(title: "안락실측", icon: "square.and.arrow.up", dark: false) { share = store.exportAnrakJSON() }
