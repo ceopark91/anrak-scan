@@ -9,6 +9,20 @@ enum Disto {
     static let distance = CBUUID(string: "3AB10101-F831-4395-B29D-570977D5BF94")
     static let command = CBUUID(string: "3AB10109-F831-4395-B29D-570977D5BF94")
 }
+// 보쉬 GLM 50-27 C/CG·50 C·120 C (공개된 분석 기준): 서비스 하나·특성 하나. C0 55 02 01 00 1A 로 자동 전송을 켜면
+// 측정 때마다 C0 55 10 06 … 패킷이 오고 7~10번째 바이트가 거리(m, Float32 리틀엔디언). C0 56 01 00 1E 는 측정(레이저 켜기·재기).
+enum BoschGLM {
+    static let service = CBUUID(string: "02A6C0D0-0451-4000-B000-FB3210111989")
+    static let data = CBUUID(string: "02A6C0D1-0451-4000-B000-FB3210111989")
+    static let autoSync = Data([0xC0, 0x55, 0x02, 0x01, 0x00, 0x1A])
+    static let measure = Data([0xC0, 0x56, 0x01, 0x00, 0x1E])
+    static func parse(_ d: Data) -> Float? {
+        let b = [UInt8](d)
+        guard b.count >= 11, b[0] == 0xC0, b[1] == 0x55, b[2] == 0x10, b[3] == 0x06 else { return nil }
+        let bits = UInt32(b[7]) | UInt32(b[8]) << 8 | UInt32(b[9]) << 16 | UInt32(b[10]) << 24
+        return Float(bitPattern: bits)
+    }
+}
 
 final class LaserLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeripheralDelegate {
     static let shared = LaserLink()
@@ -23,6 +37,7 @@ final class LaserLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     private var central: CBCentralManager?
     private var peripheral: CBPeripheral?
     private var cmdChar: CBCharacteristic?
+    private var boschChar: CBCharacteristic?
     private var wantScan = false
     private let savedKey = "distoId"
 
@@ -45,7 +60,7 @@ final class LaserLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         guard let c = central else { return }
         scanning = true; status = "측정기 찾는 중… (측정기 블루투스를 켜 주세요)"
         // 이미 시스템에 연결된 DISTO도 목록에 넣기
-        for p in c.retrieveConnectedPeripherals(withServices: [Disto.service]) where !found.contains(p) { found.append(p) }
+        for p in c.retrieveConnectedPeripherals(withServices: [Disto.service, BoschGLM.service]) where !found.contains(p) { found.append(p) }
         c.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
     }
 
@@ -58,10 +73,11 @@ final class LaserLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     func disconnect() {
         if let p = peripheral { central?.cancelPeripheralConnection(p) }
         UserDefaults.standard.removeObject(forKey: savedKey)
-        peripheral = nil; connectedName = nil; cmdChar = nil; status = "연결 안 됨"
+        peripheral = nil; connectedName = nil; cmdChar = nil; boschChar = nil; status = "연결 안 됨"
     }
     /// 앱에서 측정 버튼 누르기 (지원 모델만)
     func trigger() {
+        if let p = peripheral, let b = boschChar { p.writeValue(BoschGLM.measure, for: b, type: b.properties.contains(.write) ? .withResponse : .withoutResponse); return }
         guard let p = peripheral, let c = cmdChar, let d = "g".data(using: .ascii) else { return }
         p.writeValue(d, for: c, type: c.properties.contains(.write) ? .withResponse : .withoutResponse)
     }
@@ -83,18 +99,19 @@ final class LaserLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
     func centralManager(_ c: CBCentralManager, didDiscover p: CBPeripheral, advertisementData ad: [String: Any], rssi: NSNumber) {
         let name = (ad[CBAdvertisementDataLocalNameKey] as? String) ?? p.name ?? ""
         let uuids = (ad[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID]) ?? []
-        guard uuids.contains(Disto.service) || name.uppercased().contains("DISTO") else { return }
+        let up = name.uppercased()
+        guard uuids.contains(Disto.service) || uuids.contains(BoschGLM.service) || up.contains("DISTO") || up.contains("GLM") || up.contains("BOSCH") else { return }
         if !found.contains(p) { found.append(p) }
     }
     func centralManager(_ c: CBCentralManager, didConnect p: CBPeripheral) {
         status = "연결됨, 준비 중…"
-        p.discoverServices([Disto.service])
+        p.discoverServices([Disto.service, BoschGLM.service])
     }
     func centralManager(_ c: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) {
         status = "연결 실패: \(error?.localizedDescription ?? "다시 시도해 주세요")"
     }
     func centralManager(_ c: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
-        connectedName = nil; cmdChar = nil
+        connectedName = nil; cmdChar = nil; boschChar = nil
         if UserDefaults.standard.string(forKey: savedKey) != nil {
             status = "끊김, 다시 연결 중…"; c.connect(p)   // 측정기가 다시 켜지면 자동 연결
         } else { status = "연결 안 됨" }
@@ -102,8 +119,8 @@ final class LaserLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
 
     // CBPeripheralDelegate
     func peripheral(_ p: CBPeripheral, didDiscoverServices error: Error?) {
-        guard let s = p.services?.first(where: { $0.uuid == Disto.service }) else {
-            status = "DISTO 측정기가 아닙니다 (블루투스 지원 모델인지 확인)"; return
+        guard let s = p.services?.first(where: { $0.uuid == Disto.service || $0.uuid == BoschGLM.service }) else {
+            status = "지원하는 측정기가 아닙니다 (라이카 DISTO·보쉬 GLM 블루투스 모델)"; return
         }
         p.discoverCharacteristics(nil, for: s)
     }
@@ -111,15 +128,24 @@ final class LaserLink: NSObject, ObservableObject, CBCentralManagerDelegate, CBP
         for ch in s.characteristics ?? [] {
             if ch.properties.contains(.notify) || ch.properties.contains(.indicate) { p.setNotifyValue(true, for: ch) }
             if ch.uuid == Disto.command { cmdChar = ch }
+            if ch.uuid == BoschGLM.data {
+                boschChar = ch
+                p.writeValue(BoschGLM.autoSync, for: ch, type: ch.properties.contains(.write) ? .withResponse : .withoutResponse)
+            }
         }
-        connectedName = p.name ?? "DISTO"
+        connectedName = p.name ?? (s.uuid == BoschGLM.service ? "보쉬 GLM" : "DISTO")
         status = "연결됨: \(connectedName!) · 측정기 버튼을 누르면 값이 들어옵니다"
         UserDefaults.standard.set(p.identifier.uuidString, forKey: savedKey)
     }
     func peripheral(_ p: CBPeripheral, didUpdateValueFor ch: CBCharacteristic, error: Error?) {
-        guard ch.uuid == Disto.distance, let d = ch.value, d.count >= 4 else { return }
-        let bits = d.prefix(4).withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
-        let m = Float(bitPattern: UInt32(littleEndian: bits))
+        guard let d = ch.value else { return }
+        let m: Float
+        if ch.uuid == BoschGLM.data { guard let v = BoschGLM.parse(d) else { return }; m = v }
+        else {
+            guard ch.uuid == Disto.distance, d.count >= 4 else { return }
+            let bits = d.prefix(4).withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) }
+            m = Float(bitPattern: UInt32(littleEndian: bits))
+        }
         guard m.isFinite, m > 0, m < 300 else { return }
         lastMM = Int((Double(m) * 1000).rounded())
         seq += 1
@@ -170,11 +196,11 @@ struct LaserSheet: View {
                     } else {
                         Button(laser.scanning ? "찾는 중…" : "측정기 찾기") { laser.startScan() }
                         ForEach(laser.found, id: \.identifier) { p in
-                            Button("연결: \(p.name ?? "DISTO")") { laser.connect(p) }
+                            Button("연결: \(p.name ?? "측정기")") { laser.connect(p) }
                         }
                     }
-                } header: { Text("라이카 DISTO 레이저 측정기") } footer: {
-                    Text("D1·D2·D110·X3·X4 등 블루투스 모델. 한 번 연결하면 다음부터 측정기를 켜기만 하면 자동으로 붙습니다. 연결되면 방 고치기·카메라 자·사진 메모에서 측정기 버튼만 누르면 값이 바로 들어갑니다.")
+                } header: { Text("레이저 측정기 (라이카 DISTO · 보쉬 GLM)") } footer: {
+                    Text("라이카 D1·D2·D110·X3·X4, 보쉬 GLM 50-27 C/CG·50 C·120 C 등 블루투스 모델. 보쉬는 측정기 블루투스 버튼을 눌러 켠 뒤 찾으세요. 한 번 연결하면 다음부터 측정기를 켜기만 하면 자동으로 붙습니다. 연결되면 방 고치기·카메라 자·사진 메모에서 측정기 버튼만 누르면 값이 바로 들어갑니다.")
                 }
                 Section {
                     HStack { Text("지금 상태"); Spacer(); Text(scaleText).foregroundStyle(.secondary) }
