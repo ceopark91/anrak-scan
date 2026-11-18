@@ -49,7 +49,7 @@ final class CaptureController: NSObject, ObservableObject, RoomCaptureViewDelega
     func encode(with coder: NSCoder) {}
 
     func start() {
-        result = nil; error = nil; processing = false; scanning = true; marks = []; markMsg = nil
+        result = nil; error = nil; processing = false; scanning = true; marks = []; markMsg = nil; found = ""
         view.captureSession.run(configuration: RoomCaptureSession.Configuration())
     }
     func finish() {
@@ -71,6 +71,12 @@ final class CaptureController: NSObject, ObservableObject, RoomCaptureViewDelega
         }
     }
 
+    @Published var found = ""
+    /// 스캔 중 찾은 것 (벽·문·창·가구 개수)
+    func captureSession(_ session: RoomCaptureSession, didUpdate room: CapturedRoom) {
+        let t = "벽 \(room.walls.count) · 문 \(room.doors.count + room.openings.count) · 창 \(room.windows.count) · 가구 \(room.objects.count)"
+        DispatchQueue.main.async { self.found = t }
+    }
     // RoomCaptureSessionDelegate: 화면 안내
     func captureSession(_ session: RoomCaptureSession, didProvide instruction: RoomCaptureSession.Instruction) {
         let t: String
@@ -102,15 +108,22 @@ struct CaptureScreen: View {
     @AppStorage("quickScan") private var quick = true   // 연속 스캔: 방 이름은 나중에
     @State private var endAll = false
     @State private var savedCount = 0
+    @AppStorage("scanGuideSeen") private var guideSeen = false
+    @State private var guide = false
 
     var body: some View {
         ZStack {
             CaptureRepresentable().ignoresSafeArea()
+                .onAppear { if !guideSeen { guide = true } }
+                .sheet(isPresented: $guide) { ScanGuide { guideSeen = true; guide = false } }
             if cc.scanning { Image(systemName: "plus").font(.system(size: 28, weight: .light)).foregroundStyle(.white).shadow(radius: 2) }
             VStack(spacing: 0) {
                 HStack {
                     Button("취소") { cc.cancel(); dismiss() }
                         .padding(.horizontal, 16).padding(.vertical, 10)
+                        .background(.ultraThinMaterial, in: Capsule())
+                    Button("요령") { guide = true }
+                        .padding(.horizontal, 14).padding(.vertical, 10)
                         .background(.ultraThinMaterial, in: Capsule())
                     Spacer()
                     if cc.scanning {
@@ -141,6 +154,10 @@ struct CaptureScreen: View {
                 if cc.scanning && savedCount > 0 {
                     Text("방 \(savedCount)개 저장됨 · 다음 방으로 걸어가며 계속 비추세요").font(.caption.weight(.semibold)).foregroundStyle(.black)
                         .padding(.horizontal, 12).padding(.vertical, 6).background(Color.white, in: Capsule()).padding(.top, 10)
+                }
+                if cc.scanning && !cc.found.isEmpty {
+                    Text(cc.found).font(.caption.weight(.semibold)).foregroundStyle(.black)
+                        .padding(.horizontal, 10).padding(.vertical, 5).background(Color.white.opacity(0.9), in: Capsule()).padding(.top, 8)
                 }
                 if cc.scanning {
                     Text(cc.hint).font(.subheadline).foregroundStyle(.white)
@@ -238,5 +255,34 @@ struct CaptureScreen: View {
         }
         cc.result = nil
         saving = false
+    }
+}
+
+
+/// 라이다 스캔을 정확하게: 처음 한 번 보여 주는 안내 (스캔 화면 [요령]으로 다시 보기)
+struct ScanGuide: View {
+    let done: () -> Void
+    let tips: [(String, String, String)] = [
+        ("lightbulb", "불 다 켜기", "커튼·블라인드는 걷고, 어두우면 인식이 흔들립니다."),
+        ("figure.walk", "벽을 따라 한 바퀴", "방 가운데가 아니라 벽에서 1~2m 떨어져 벽을 따라 돕니다."),
+        ("tortoise", "천천히", "한 걸음에 1초. 폰은 가슴 높이로 들고 흔들지 않습니다."),
+        ("arrow.up.and.down", "모서리는 위아래로", "모서리마다 천장 선과 바닥 선을 한 번씩 훑습니다."),
+        ("rectangle.on.rectangle", "거울·유리는 비스듬히", "정면으로 비추면 반사 때문에 벽이 잘못 잡힙니다."),
+        ("arrow.triangle.2.circlepath", "시작한 곳에서 끝내기", "출발점으로 돌아와 겹치게 비추고 끝내야 방이 딱 닫힙니다."),
+        ("ruler", "긴 벽 하나만 재기", "끝난 뒤 가장 긴 벽 하나만 레이저·줄자로 재서 [도면 고치기]에 넣으면 나머지도 맞춰지고, 앱이 오차를 배워 다음 스캔이 더 정확해집니다.")]
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(tips, id: \.1) { t in
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: t.0).font(.title3).frame(width: 30)
+                        VStack(alignment: .leading, spacing: 3) { Text(t.1).font(.headline); Text(t.2).font(.subheadline).foregroundStyle(.secondary) }
+                    }.padding(.vertical, 4)
+                }
+                Section { Text("라이다 배율 보정: \(LidarCal.text) · 배운 값 \(LidarCal.learned)개").font(.caption).foregroundStyle(.secondary) }
+            }
+            .navigationTitle("정확하게 스캔하는 법").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("알겠어요") { done() }.fontWeight(.semibold) } }
+        }
     }
 }

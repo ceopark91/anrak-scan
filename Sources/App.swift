@@ -285,6 +285,24 @@ struct PlanTab: View {
 
 /// 평면도·천장도 그림 (벽 안쪽 선 + 치수, 문·창). rooms는 정렬·위치 보정이 끝난 방
 struct PlanCanvas: View {
+    /// 스캔한 가구: 종류별 색 네모 + 이름
+    static func drawObjs(_ ctx: GraphicsContext, _ r: ScanRoom, _ sc: Double, _ fs: Double, _ S: (CGPoint) -> CGPoint) {
+        for o in r.objs ?? [] {
+            let a: Double = (o.rot + r.rot) * .pi / 180
+            let ux = CGPoint(x: cos(a), y: sin(a)), uz = CGPoint(x: -sin(a), y: cos(a))
+            let c0 = r.toPlan(CGPoint(x: o.x, y: o.y))
+            var cs: [CGPoint] = []
+            for (sx, sz) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+                let px: Double = c0.x + ux.x * o.w / 2 * sx + uz.x * o.d / 2 * sz
+                let py: Double = c0.y + ux.y * o.w / 2 * sx + uz.y * o.d / 2 * sz
+                cs.append(S(CGPoint(x: px, y: py)))
+            }
+            var p = Path(); p.addLines(cs); p.closeSubpath()
+            let col = Furn.sw(o.kind)
+            ctx.fill(p, with: .color(col.opacity(0.55))); ctx.stroke(p, with: .color(col), lineWidth: 1)
+            if o.w * sc > 26 { ctx.draw(Text(Furn.name(o.kind)).font(.system(size: max(7, fs * 0.9))).foregroundColor(.black.opacity(0.7)), at: S(c0)) }
+        }
+    }
     let rooms: [ScanRoom]
     let ceiling: Bool
     var fontScale: Double = 1
@@ -328,18 +346,7 @@ struct PlanCanvas: View {
                         }
                     }
                 }
-                if !ceiling {
-                    for o in r.objs ?? [] {
-                        let a = (o.rot + r.rot) * .pi / 180, ux = CGPoint(x: cos(a), y: sin(a)), uz = CGPoint(x: -sin(a), y: cos(a))
-                        let c0 = r.toPlan(CGPoint(x: o.x, y: o.y))
-                        let cs = [(-1.0, -1.0), (1, -1), (1, 1), (-1, 1)].map { sx, sz in
-                            S(CGPoint(x: c0.x + ux.x * o.w / 2 * sx + uz.x * o.d / 2 * sz, y: c0.y + ux.y * o.w / 2 * sx + uz.y * o.d / 2 * sz)) }
-                        var p = Path(); p.addLines(cs); p.closeSubpath()
-                        ctx.fill(p, with: .color(Furn.sw(o.kind).opacity(0.55))); ctx.stroke(p, with: .color(Furn.sw(o.kind)), lineWidth: 1)
-                        let ctr = S(c0), wpx = o.w * sc
-                        if wpx > 26 { ctx.draw(Text(Furn.name(o.kind)).font(.system(size: max(7, fs * 0.9))).foregroundColor(.black.opacity(0.7)), at: ctr) }
-                    }
-                }
+                if !ceiling { PlanCanvas.drawObjs(ctx, r, sc, fs, S) }
                 for fx in r.fixtures ?? [] {
                     let c = S(r.toPlan(CGPoint(x: fx.x, y: fx.y)))
                     let rr = ceiling ? 6.0 : 3.5
