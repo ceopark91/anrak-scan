@@ -492,6 +492,10 @@ struct SketchScreen: View {
         guard let s = segs, let r = result, r.ok else { return }
         if let id = editRoomId, let i = store.site.rooms.firstIndex(where: { $0.id == id }) {
             var room = store.site.rooms[i]
+            // 스캔한 방을 줄자·레이저로 고친 값은 라이다 배율 학습에 씀
+            if !room.sessionId.hasPrefix("sketch_"), !room.sessionId.hasPrefix("dxf") {
+                for g in s where g.prior && g.len > 0 { LidarCal.learn(scanned: Int(g.px), actual: g.len) }
+            }
             var walls = SK.walls(s, r.lens)
             for k in walls.indices { walls[k].ops = clampOps(s[k].ops, walls[k].len) }
             room.walls = walls; room.rot = (s[0].dir * 10).rounded() / 10; room.name = name

@@ -54,7 +54,7 @@ enum PlanGeometry {
             var t = ang[(i + 1) % n] - ang[i]
             while t > 180 { t -= 360 }; while t <= -180 { t += 360 }
             t = (t * 10).rounded() / 10
-            let turn = abs(t - 90) < 1.5 ? "R" : abs(t + 90) < 1.5 ? "L" : String(t)
+            let turn = abs(t - 90) < 4 ? "R" : abs(t + 90) < 4 ? "L" : String(t)   // 4° 안쪽은 직각으로
             let len = Int((hypot(b.x - a.x, b.y - a.y) / 10).rounded()) * 10
             walls.append(AWall(len: len, turn: turn, ops: []))
         }
@@ -78,6 +78,13 @@ enum PlanGeometry {
             walls[bst.i].ops.append(AOp(id: uid(), kind: o.kind, off: r10(off), w: r10(w), h: r10(o.h), sill: max(0, r10(o.sill))))
         }
         for i in 0..<n { walls[i].ops.sort { $0.off < $1.off } }
+        // 직각으로 맞추며 생긴 끝점 어긋남을 벽마다 나눠 닫기 (긴 벽이 더 많이 받음)
+        if let L = AutoFit.solve(walls, []) {
+            for i in 0..<n where abs(L[i] - walls[i].len) < 150 {
+                walls[i].len = L[i]
+                walls[i].ops = walls[i].ops.map { var o = $0; o.w = min(o.w, L[i]); o.off = max(0, min(o.off, L[i] - o.w)); return o }
+            }
+        }
         return (walls, Double(q[0].x), Double(q[0].y), (ang[0] * 10).rounded() / 10)
     }
 

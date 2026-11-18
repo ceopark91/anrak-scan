@@ -268,6 +268,7 @@ struct AutoMeasureScreen: View {
     func apply(_ v: Int) {
         guard let t = ac.target else { msg = "먼저 마주 보는 벽에 겨누세요"; return }
         spans.removeAll { ($0.back == t.back && $0.front == t.front) || ($0.back == t.front && $0.front == t.back) }
+        if spans.isEmpty, let r = store.site.rooms.first(where: { $0.id == roomId }), !r.sessionId.hasPrefix("sketch_") { LidarCal.learn(scanned: t.now, actual: v) }
         spans.append(Span(back: t.back, front: t.front, mm: v))
         guard let L = AutoFit.solve(base, spans) else { spans.removeLast(); msg = "그 값으로는 방이 맞지 않습니다. 다시 재 보세요"; return }
         lens = L

@@ -14,8 +14,8 @@ targets:
       path: Resources/Info.plist
       properties:
         CFBundleDisplayName: 안락 실측
-        CFBundleShortVersionString: "1.8.0"
-        CFBundleVersion: "13"
+        CFBundleShortVersionString: "1.9.0"
+        CFBundleVersion: "14"
         UILaunchScreen: {}
         UIRequiredDeviceCapabilities: [arkit]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]

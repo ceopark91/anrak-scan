@@ -12,6 +12,7 @@ enum Plan3D {
         let floorMat = SCNMaterial(); floorMat.diffuse.contents = UIColor(red: 0.79, green: 0.65, blue: 0.48, alpha: 1)
         let trimMat = SCNMaterial(); trimMat.diffuse.contents = UIColor(white: 0.97, alpha: 1)
         let lightMat = SCNMaterial(); lightMat.diffuse.contents = UIColor.white; lightMat.emission.contents = UIColor(red: 1, green: 0.95, blue: 0.84, alpha: 1)
+        let doorMat = SCNMaterial(); doorMat.diffuse.contents = UIColor(red: 0.62, green: 0.45, blue: 0.30, alpha: 1)
         let winMat = SCNMaterial(); winMat.diffuse.contents = UIColor(red: 0.7, green: 0.85, blue: 0.95, alpha: 0.35); winMat.transparency = 0.35
         for r in rooms {
             let pts = r.localPoints().map { r.toPlan($0) }
@@ -58,6 +59,7 @@ enum Plan3D {
                     box(s, e, 0, sill, wallMat, t)          // 창 아래
                     box(s, e, top, H, wallMat, t)           // 문·창 위
                     if o.kind == "window" { box(s, e, sill, top, winMat, 0.02) }
+                    else if o.w < 1300 { box(s, e, 0, top, doorMat, 0.04) }   // 문짝 (넓은 개구부는 비움)
                     cut = max(cut, e)
                 }
                 box(cut, L, 0, H, wallMat, t)
@@ -77,6 +79,25 @@ enum Plan3D {
                 }
                 let drop = Float(r.moldDrop) / 1000
                 if drop > 0 { trim(0, L, H - drop, H, max(0.015, Float(r.moldProj) / 1000)) }
+            }
+            // 스캔한 가구: 종류별 색·모양. 등받이·헤드는 가까운 벽 쪽으로
+            let poly = Array(r.localPoints().prefix(n))
+            func wallDist(_ p: CGPoint) -> Double {
+                var m = Double.infinity
+                for i in 0..<n { let a = poly[i], b = poly[(i + 1) % n], dx = b.x - a.x, dy = b.y - a.y, L2 = max(1, dx * dx + dy * dy)
+                    let t = max(0, min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)); m = min(m, hypot(p.x - a.x - dx * t, p.y - a.y - dy * t)) }
+                return m
+            }
+            for o in r.objs ?? [] {
+                var la = o.rot * .pi / 180
+                let zl = CGPoint(x: -sin(la), y: cos(la))
+                let front = CGPoint(x: o.x + zl.x * o.d / 2, y: o.y + zl.y * o.d / 2), back = CGPoint(x: o.x - zl.x * o.d / 2, y: o.y - zl.y * o.d / 2)
+                if wallDist(front) < wallDist(back) { la += .pi }
+                let nd = Furn.node(o)
+                let q = r.toPlan(CGPoint(x: o.x, y: o.y))
+                nd.position = SCNVector3(Float(q.x) / 1000, Float(o.z) / 1000, Float(q.y) / 1000)
+                nd.eulerAngles.y = -Float(la + r.rot * .pi / 180)
+                scene.rootNode.addChildNode(nd)
             }
             // 조명·실링팬 (네모 왼쪽 위 기준 → 방 좌표 → 도면)
             let B = r.box

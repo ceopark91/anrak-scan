@@ -199,7 +199,8 @@ struct PlanTab: View {
                         building3D = true
                         Task {
                             var u: URL? = nil, note: String? = nil
-                            if store.site.rooms.contains(where: { $0.raw != nil }) { (u, note) = await House3D.build(store.site) }
+                            u = Plan3D.build(store.site.placedRooms, name: store.site.name)
+                            if u == nil, store.site.rooms.contains(where: { $0.raw != nil }) { (u, note) = await House3D.build(store.site) }
                             if u == nil { u = Plan3D.build(store.site.placedRooms, name: store.site.name); note = u == nil ? "3D를 만들지 못했습니다" : nil }
                             building3D = false; message = note
                             if let u { preview = u }
@@ -229,7 +230,7 @@ struct PlanTab: View {
         .fullScreenCover(item: $sketchEdit) { SketchScreen(editRoomId: $0.id).environmentObject(store) }
         .fullScreenCover(item: $ceilEdit) { CeilingScreen(roomId: $0.id).environmentObject(store) }
         .fullScreenCover(item: $aimEdit) { AutoMeasureScreen(roomId: $0.id).environmentObject(store) }
-        .onAppear { LaserLink.shared.wake() }
+        .onAppear { LaserLink.shared.wake(); Furn.backfill(store) }
         .fullScreenCover(isPresented: $memos) { MemoListScreen().environmentObject(store) }
         .fullScreenCover(isPresented: $tracing) { TraceScreen().environmentObject(store) }
         .fullScreenCover(item: Binding(get: { preview.map { ShareItem(url: $0) } }, set: { preview = $0?.url })) { Preview3D(url: $0.url) }
@@ -262,6 +263,7 @@ struct PlanTab: View {
                 if !(r.fixtures ?? []).isEmpty {
                     Text("천장: " + fixtureKinds.compactMap { k in r.count(k.0) > 0 ? "\(k.1) \(r.count(k.0))" : nil }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
                 }
+                if !(r.objs ?? []).isEmpty { Text("가구: " + r.furnitureSummary).font(.caption).foregroundStyle(.secondary) }
                 if r.gap > 60 { Text("벽 길이가 서로 안 맞습니다 (끝점 \(mm(r.gap))mm 어긋남)").font(.caption).foregroundStyle(.red) }
                 Text((r.mold?.k == "crown" ? "각몰딩 \(r.mold!.w)·\(r.mold!.a)°" : "몰딩 \(moldName(r.moldType))") + (r.ceilT == "well" ? " · 우물 \((r.wells ?? []).count)" : "") + ((r.marks ?? []).isEmpty ? "" : " · 조명 \((r.marks ?? []).filter { $0.k == "light" }.count) · 실링팬 \((r.marks ?? []).filter { $0.k == "fan" }.count)") + " · 걸레받이 \((r.baseH ?? 0) == 0 ? "없음" : "\(r.baseH ?? 0)mm") · 도배 높이 \(mm(r.paperH))")
                     .font(.caption).foregroundStyle(.secondary)
@@ -272,8 +274,8 @@ struct PlanTab: View {
                 Button("겨눠서 재기") { aimEdit = IdString(id: r.id) }.font(.subheadline)
                 Button("천장·몰딩") { ceilEdit = IdString(id: r.id) }.font(.subheadline)
                 Button("방 정보") { edit = IdString(id: r.id) }.font(.subheadline)
-                if let f = r.usdz { Button("3D 보기") { preview = Store.docs.appendingPathComponent(f) }.font(.subheadline) }
-                else { Button("3D 보기") { preview = Plan3D.build([store.site.placed(r)], name: r.name) }.font(.subheadline) }
+                Button("3D 보기") { preview = Plan3D.build([store.site.placed(r)], name: r.name) }.font(.subheadline)
+                if let f = r.usdz { Button("스캔 원본 3D") { preview = Store.docs.appendingPathComponent(f) }.font(.caption) }
                 Button("삭제") { confirmDelete = r }.font(.subheadline).foregroundStyle(.red)
             }
         }
@@ -324,6 +326,18 @@ struct PlanCanvas: View {
                             var seg = Path(); seg.move(to: S(r.toPlan(p0))); seg.addLine(to: S(r.toPlan(p1)))
                             ctx.stroke(seg, with: .color(op.kind == "door" ? Color(red: 0.62, green: 0.45, blue: 0.30) : Color(red: 0.35, green: 0.62, blue: 0.85)), lineWidth: 5)
                         }
+                    }
+                }
+                if !ceiling {
+                    for o in r.objs ?? [] {
+                        let a = (o.rot + r.rot) * .pi / 180, ux = CGPoint(x: cos(a), y: sin(a)), uz = CGPoint(x: -sin(a), y: cos(a))
+                        let c0 = r.toPlan(CGPoint(x: o.x, y: o.y))
+                        let cs = [(-1.0, -1.0), (1, -1), (1, 1), (-1, 1)].map { sx, sz in
+                            S(CGPoint(x: c0.x + ux.x * o.w / 2 * sx + uz.x * o.d / 2 * sz, y: c0.y + ux.y * o.w / 2 * sx + uz.y * o.d / 2 * sz)) }
+                        var p = Path(); p.addLines(cs); p.closeSubpath()
+                        ctx.fill(p, with: .color(Furn.sw(o.kind).opacity(0.55))); ctx.stroke(p, with: .color(Furn.sw(o.kind)), lineWidth: 1)
+                        let ctr = S(c0), wpx = o.w * sc
+                        if wpx > 26 { ctx.draw(Text(Furn.name(o.kind)).font(.system(size: max(7, fs * 0.9))).foregroundColor(.black.opacity(0.7)), at: ctr) }
                     }
                 }
                 for fx in r.fixtures ?? [] {

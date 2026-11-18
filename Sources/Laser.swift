@@ -166,7 +166,20 @@ enum LidarCal {
         UserDefaults.standard.set(s, forKey: "lidarScale")
         return true
     }
-    static func reset() { UserDefaults.standard.removeObject(forKey: "lidarScale") }
+    static func reset() { UserDefaults.standard.removeObject(forKey: "lidarScale"); UserDefaults.standard.removeObject(forKey: "lidarLearn") }
+    /// 스캔 값(scanned)을 줄자·레이저 값(actual)으로 고칠 때마다 배워 둠 → 3번 이상 쌓이면 가운데 값으로 다음 스캔 배율을 맞춤
+    static func learn(scanned: Int, actual: Int) {
+        guard scanned > 600, actual > 600 else { return }
+        let r = Double(actual) / Double(scanned)
+        guard r > 0.93, r < 1.07 else { return }            // 다른 벽을 고친 것 같은 큰 차이는 무시
+        var a = (UserDefaults.standard.array(forKey: "lidarLearn") as? [Double]) ?? []
+        a.append(scale * r); if a.count > 20 { a.removeFirst(a.count - 20) }
+        UserDefaults.standard.set(a, forKey: "lidarLearn")
+        guard a.count >= 3 else { return }
+        let m = a.sorted()[a.count / 2]
+        if m > 0.9, m < 1.1 { UserDefaults.standard.set(m, forKey: "lidarScale") }
+    }
+    static var learned: Int { ((UserDefaults.standard.array(forKey: "lidarLearn") as? [Double]) ?? []).count }
     static var text: String {
         let p = (scale - 1) * 100
         return abs(p) < 0.05 ? "보정 없음" : String(format: "%@%.1f%% 보정 중", p > 0 ? "+" : "", p)
