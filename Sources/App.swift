@@ -145,6 +145,8 @@ struct PlanTab: View {
                 }
                 .padding(.horizontal, 4).padding(.top, 8)
 
+                BigButton(title: "손으로 그리기 (대충 그리고 치수만)", icon: "scribble", dark: true) { sketching = true }
+
                 Card {
                     HStack {
                         Picker("", selection: $mode) { Text("평면도").tag(0); Text("천장도").tag(1) }.pickerStyle(.segmented)
@@ -154,9 +156,10 @@ struct PlanTab: View {
                     }
                     if store.site.rooms.isEmpty {
                         VStack(spacing: 8) {
-                            Image(systemName: "viewfinder").font(.system(size: 36)).foregroundStyle(.secondary)
-                            Text("아직 방이 없습니다").foregroundStyle(.secondary)
+                            Image(systemName: "scribble").font(.system(size: 36)).foregroundStyle(.secondary)
+                            Text("여기를 눌러 방 모양을 손으로 그리세요").foregroundStyle(.secondary)
                         }.frame(maxWidth: .infinity, minHeight: 220)
+                        .contentShape(Rectangle()).onTapGesture { sketching = true }
                     } else {
                         PlanCanvas(rooms: store.site.placedRooms, ceiling: mode == 1).frame(height: 320)
                             .contentShape(Rectangle()).onTapGesture { zoomPlan = true }
@@ -173,10 +176,9 @@ struct PlanTab: View {
                     }.background(Color.white, in: RoundedRectangle(cornerRadius: 16))
                 }
 
-                BigButton(title: store.site.rooms.isEmpty ? "방 스캔 시작" : "다음 방 스캔", icon: "camera.metering.matrix", dark: true) {
+                BigButton(title: store.site.rooms.isEmpty ? "라이다로 방 스캔" : "다음 방 스캔", icon: "camera.metering.matrix", dark: false) {
                     if RoomCaptureSession.isSupported { scanning = true } else { message = "이 기기는 라이다가 없어 스캔할 수 없습니다. 도면 불러오기를 써 주세요." }
                 }
-                BigButton(title: "손으로 그리기 (치수 넣으면 반듯하게)", icon: "scribble", dark: false) { sketching = true }
                 BigButton(title: store.site.memos.isEmpty ? "사진 실측 메모 (점·선·치수)" : "사진 실측 메모 \(store.site.memos.count)개", icon: "ruler", dark: false) { memos = true }
                 HStack(spacing: 10) {
                     BigButton(title: "사진·손도면", icon: "photo", dark: false) { tracing = true }

@@ -201,6 +201,26 @@ struct SketchScreen: View {
         segs = s; sel = 0; lenText = ""; msg = nil; focus = true
     }
 
+    /// 잘못 그린 벽 지우기: 고른 벽을 빼고 같은 방향으로 이어지는 벽은 합침
+    func deleteWall() {
+        guard var s = segs else { return }
+        s.remove(at: sel)
+        var ch = true
+        while ch && s.count > 3 {
+            ch = false
+            for i in s.indices {
+                let j = (i + 1) % s.count
+                if abs(SK.norm(s[i].dir - s[j].dir)) < 0.5 {
+                    s[i].px += s[j].px
+                    s[i].len = (s[i].len > 0 && s[j].len > 0) ? s[i].len + s[j].len : 0
+                    s.remove(at: j); ch = true; break
+                }
+            }
+        }
+        if s.count < 3 { segs = nil; raw = []; taps = []; msg = "벽이 3개보다 적어 다시 그려 주세요"; return }
+        segs = s; sel = min(sel, s.count - 1); lenText = s[sel].len > 0 ? "\(s[sel].len)" : ""
+    }
+
     func next() {
         guard let s = segs else { return }
         if let j = s.indices.first(where: { $0 > sel && s[$0].len <= 0 }) ?? s.indices.first(where: { s[$0].len <= 0 }) { sel = j } else { sel = (sel + 1) % s.count }
@@ -217,9 +237,11 @@ struct SketchScreen: View {
     func poly() -> [CGPoint] {
         guard let s = segs else { return [] }
         let r = result, has = r.map { $0.lens.allSatisfy { $0 > 0 } } ?? false
+        // 아직 잰 값이 없으면 그림 길이로 닫아서 보여 줌
+        let shown = has ? r!.lens : SK.solve(s.map { SkSeg(dir: $0.dir, px: $0.px, len: Int($0.px.rounded())) }).lens
         var x = 0.0, y = 0.0; var P = [CGPoint.zero]
         for (i, g) in s.enumerated() {
-            let L = has ? Double(r!.lens[i]) : g.px
+            let L = shown[i] > 0 ? Double(shown[i]) : g.px
             x += cos(g.dir * .pi / 180) * L; y += sin(g.dir * .pi / 180) * L; P.append(CGPoint(x: x, y: y))
         }
         return P
@@ -294,6 +316,7 @@ struct SketchScreen: View {
                         .padding(10).background(Color.white, in: RoundedRectangle(cornerRadius: 10))
                         .onChange(of: lenText) { _, v in if segs != nil, sel < s.count { segs![sel].len = Int(v.filter(\.isNumber)) ?? 0 } }
                     Button("다음") { next() }.buttonStyle(.bordered)
+                    Button("지우기") { deleteWall() }.buttonStyle(.bordered).tint(.red)
                     if laser.connected { Button("측정") { laser.trigger() }.buttonStyle(.bordered) }
                 }
                 HStack(spacing: 8) {
