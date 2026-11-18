@@ -51,6 +51,8 @@ struct RoomSel: Codable, Hashable {
     var lights = 0
     var outlets = 0
     var demo = false
+    var rep = 0             // 벽지 무늬 반복(mm), 0 = 무지
+    var loss = 0            // 도배 로스 %
     var qty: [String: Double] = [:]   // 수량 직접 고침 (키 → 값)
 
     init() {}
@@ -69,8 +71,10 @@ struct RoomSel: Codable, Hashable {
         outlets = (try? c.decode(Int.self, forKey: .outlets)) ?? 0
         demo = (try? c.decode(Bool.self, forKey: .demo)) ?? false
         qty = (try? c.decode([String: Double].self, forKey: .qty)) ?? [:]
+        rep = (try? c.decode(Int.self, forKey: .rep)) ?? 0
+        loss = (try? c.decode(Int.self, forKey: .loss)) ?? 0
     }
-    enum K: String, CodingKey { case wall, ceil, floor, mold, base, doorFrame, doorNew, doorFilm, sash, lights, outlets, demo, qty }
+    enum K: String, CodingKey { case wall, ceil, floor, mold, base, doorFrame, doorNew, doorFilm, sash, lights, outlets, demo, qty, rep, loss }
 }
 
 struct ExtraLine: Codable, Identifiable, Hashable {
@@ -129,6 +133,29 @@ enum Calc {
     }
 
     /// 벽 도배 장 목록 (mm): 높이+100, 문·창 위아래는 짧은 장
+    /// 무늬 반복: 장 길이를 반복 길이 배수로 올림 (무늬 맞추며 버리는 길이)
+    static func repeatUp(_ l: Int, _ rep: Int) -> Int {
+        guard rep > 0 else { return l }
+        return Int(ceil(Double(l) / Double(rep))) * rep
+    }
+
+    /// 로스 %만큼 롤 더함 (올림)
+    static func withLoss(_ n: Int, _ pct: Int) -> Int {
+        guard pct > 0, n > 0 else { return n }
+        return Int(ceil(Double(n) * Double(100 + pct) / 100))
+    }
+
+    /// 우물천장 옆면 장 목록: 둘레 / 폭, 길이 = 깊이 + 100
+    static func wellStrips(_ r: ScanRoom, width: Int) -> [Int] {
+        guard (r.ceilT ?? "flat") == "well" else { return [] }
+        var out: [Int] = []
+        for w in r.wells ?? [] where w.d > 0 {
+            let n = Int(ceil(Double(2 * (w.a + w.b)) / Double(width)))
+            out += Array(repeating: w.d + 100, count: n)
+        }
+        return out
+    }
+
     static func wallStrips(_ r: ScanRoom, width: Int) -> [Int] {
         var out: [Int] = []
         let full = r.paperH + 100
@@ -179,16 +206,26 @@ enum Calc {
         let ceilArea = r.area
         // 벽
         if let sp = paperSpec(s.wall) {
-            let st = wallStrips(r, width: sp.width)
-            add(sp.key, Double(rolls(st, rollLen: sp.roll)), "\(st.count)장 · 도배 높이 \(mm(r.paperH))", tag: ".w")
+            let st = wallStrips(r, width: sp.width).map { repeatUp($0, s.rep) }
+            let n = withLoss(rolls(st, rollLen: sp.roll), s.loss)
+            var note = "\(st.count)장 · 도배 높이 \(mm(r.paperH))"
+            if s.rep > 0 { note += " · 무늬 \(s.rep / 10)cm 맞춤" }
+            if s.loss > 0 { note += " · 로스 \(s.loss)%" }
+            add(sp.key, Double(n), note, tag: ".w")
         } else if s.wall == "paint" {
             add("paint", (r.wallArea * 10).rounded() / 10, "벽 면적(문·창 뺌)", tag: ".w")
         }
         // 천장
         if let sp = paperSpec(s.ceil) {
             let st = ceilStrips(r, width: sp.width)
+            let ws = wellStrips(r, width: sp.width)
             let fx = (r.fixtures ?? []).count + (r.marks ?? []).count
-            add(sp.key, Double(rolls(st, rollLen: sp.roll)), "\(st.count)장 × \(mm(st.first ?? 0))" + (fx > 0 ? " · 천장 기물 \(fx)개 따내기" : ""), tag: ".c")
+            let n = withLoss(rolls(st + ws, rollLen: sp.roll), s.loss)
+            var note = "\(st.count)장 × \(mm(st.first ?? 0))"
+            if !ws.isEmpty { note += " · 우물 옆면 \(ws.count)장" }
+            if fx > 0 { note += " · 천장 기물 \(fx)개 따내기" }
+            if s.loss > 0 { note += " · 로스 \(s.loss)%" }
+            add(sp.key, Double(n), note, tag: ".c")
         } else if s.ceil == "paint" {
             add("paint", (ceilArea * 10).rounded() / 10, "천장 면적", tag: ".c")
         }

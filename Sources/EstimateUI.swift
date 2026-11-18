@@ -145,7 +145,11 @@ struct RoomEstimateCard: View {
             }.foregroundStyle(.black)
             if open {
                 ChipRow(title: "벽", options: papers, sel: $sel.wall)
+                if sel.wall != "none" && sel.wall != "paint" {
+                    ChipRow(title: "벽지 무늬", options: [(0, "무지"), (320, "작은 무늬 32cm"), (530, "53cm"), (640, "64cm")], sel: $sel.rep)
+                }
                 ChipRow(title: "천장", options: papers, sel: $sel.ceil)
+                ChipRow(title: "도배 로스", options: [(0, "없음"), (5, "5%"), (10, "10%"), (15, "15% 초보·복잡")], sel: $sel.loss)
                 ChipRow(title: "바닥", options: floors, sel: $sel.floor)
                 ChipRow(title: "천장 몰딩 (새로 시공)", options: molds, sel: $sel.mold)
                 Toggle("걸레받이 새로 시공", isOn: $sel.base).font(.subheadline).tint(.black)

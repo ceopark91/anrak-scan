@@ -156,6 +156,8 @@ struct SketchScreen: View {
     @State private var labelPos: [CGPoint] = []
     @State private var osel: Int? = nil              // 고른 벽의 몇 번째 문·창
     @State private var opHits: [OpHit] = []
+    @State private var diagText = ""                 // 잰 대각선 (네모 방 직각 확인)
+    @State private var diagMode = false
     @FocusState private var focus: Bool
 
     var result: SkResult? { segs.map { SK.solve($0) } }
@@ -184,6 +186,7 @@ struct SketchScreen: View {
             .onAppear { if segs == nil { loadRoom() } }
             .onChange(of: laser.seq) { _, _ in
                 guard let v = laser.lastMM, segs != nil else { return }
+                if diagMode { diagText = String(v); diagMode = false; return }
                 segs![sel].len = v; next()
             }
         }
@@ -373,7 +376,8 @@ struct SketchScreen: View {
             let L = max(1, hypot(b.x - a.x, b.y - a.y)), nx = (b.y - a.y) / L, ny = -(b.x - a.x) / L, tx = (b.x - a.x) / L, ty = (b.y - a.y) / L
             let m = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
             let val = g.len > 0 ? mm(g.len) : has ? "\(g.prior ? "스캔" : "자동") \(mm(r!.lens[i]))" : "?"
-            let t = ctx.resolve(Text("\(i + 1)  \(val)").font(.caption.weight(g.len > 0 ? .bold : .regular)).foregroundColor(i == sel ? .white : g.len > 0 ? .black : .gray))
+            let lockT: Text = g.len > 0 ? Text(Image(systemName: "lock.fill")) + Text(" ") : Text("")
+            let t = ctx.resolve((Text("\(i + 1)  ") + lockT + Text(val)).font(.caption.weight(g.len > 0 ? .bold : .regular)).foregroundColor(i == sel ? .white : g.len > 0 ? .black : .gray))
             let sz = t.measure(in: CGSize(width: 300, height: 40)); let bw = sz.width + 16
             var cands: [(CGFloat, CGFloat)] = []
             for d in [22.0, 46, 70, 96, 124, 154] { for k in [0.0, -0.6, 0.6, -1.2, 1.2] { cands.append((d, k * bw)) } }
@@ -446,6 +450,7 @@ struct SketchScreen: View {
                         Button("빼기") { segs![sel].ops.remove(at: k); osel = nil }.buttonStyle(.bordered).tint(.red)
                     }
                 }
+                if let d = diagInfo() { diagRow(d) }
                 HStack(spacing: 8) {
                     Text("천장고").font(.subheadline)
                     TextField("2300", value: $ceil, format: .number).keyboardType(.numberPad).frame(width: 70)
@@ -466,6 +471,35 @@ struct SketchScreen: View {
         }
         .padding(14)
         .background(Color(white: 0.96))
+    }
+
+    /// 네모 방이면 계산 대각선 (마주 보는 벽 평균)
+    func diagInfo() -> (a: Int, b: Int, d: Int)? {
+        guard let s = segs, s.count == 4, let r = result, r.ok else { return nil }
+        for i in 0..<4 { let t = abs(SK.norm(s[(i + 1) % 4].dir - s[i].dir)); if abs(t - 90) > 0.5 { return nil } }
+        let a = (r.lens[0] + r.lens[2]) / 2, b = (r.lens[1] + r.lens[3]) / 2
+        return (a, b, Int(hypot(Double(a), Double(b)).rounded()))
+    }
+
+    func diagRow(_ d: (a: Int, b: Int, d: Int)) -> some View {
+        let m = Int(diagText.filter(\.isNumber)) ?? 0
+        var note = "대각선을 재면 직각인지 확인합니다"
+        var bad = false
+        if m > 0 {
+            let c = (Double(d.a * d.a + d.b * d.b) - Double(m * m)) / (2 * Double(d.a) * Double(d.b))
+            let ang = acos(max(-1, min(1, c))) * 180 / .pi
+            let off = abs(ang - 90), diff = abs(m - d.d)
+            if diff <= 10 { note = "직각 맞음 (차이 \(diff)mm)" }
+            else { note = String(format: "모서리가 약 %.1f° 틀어짐 (차이 %dmm) · 도배·바닥 재단 때 주의", off, diff); bad = true }
+        }
+        return HStack(spacing: 8) {
+            Text("대각선").font(.subheadline)
+            TextField("계산 \(d.d)", text: $diagText).keyboardType(.numberPad).frame(width: 90)
+                .padding(8).background(Color.white, in: RoundedRectangle(cornerRadius: 10))
+            if laser.connected { Button(diagMode ? "쏘세요" : "측정") { diagMode = true; laser.trigger() }.buttonStyle(.bordered) }
+            Text(note).font(.caption).foregroundStyle(bad ? .red : .secondary).lineLimit(2)
+            Spacer(minLength: 0)
+        }
     }
 
     func opField(_ label: String, _ key: WritableKeyPath<AOp, Int>) -> some View {
