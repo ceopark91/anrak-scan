@@ -1,6 +1,7 @@
 import SwiftUI
 import ARKit
 import PhotosUI
+import Vision
 
 // MARK: - 사진 실측 메모: 사진 위에 점과 점으로 선을 긋고 치수를 적는다.
 // 아이폰 라이다로 찍으면 사진 깊이 정보로 선 길이를 먼저 대략 계산해 준다.
@@ -110,6 +111,69 @@ final class EdgeSnapper {
         else if bestE.0 > 0.004 { p = (bestE.1, bestE.2) }
         else { return (nx, ny) }
         return ((Double(p.0) + 0.5) / Double(w), (Double(p.1) + 0.5) / Double(h))
+    }
+}
+
+// MARK: 사진 속 곧은 선 자동 찾기 (Vision 윤곽 → 다각형 근사 → 긴 변만 → 같은 선끼리 합치기)
+
+struct AutoSeg: Hashable { var a: CGPoint; var b: CGPoint      // 사진 위치 0~1 (위가 0)
+    var len: Double { hypot(b.x - a.x, b.y - a.y) }
+    var ang: Double { atan2(b.y - a.y, b.x - a.x) }
+    func near(_ p: CGPoint) -> CGPoint {
+        let dx = b.x - a.x, dy = b.y - a.y, L2 = max(1e-9, dx * dx + dy * dy)
+        let t = max(0, min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)); return CGPoint(x: a.x + dx * t, y: a.y + dy * t)
+    }
+    /// 무한 직선 위로 내린 점
+    func proj(_ p: CGPoint) -> CGPoint {
+        let dx = b.x - a.x, dy = b.y - a.y, L2 = max(1e-9, dx * dx + dy * dy)
+        let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2; return CGPoint(x: a.x + dx * t, y: a.y + dy * t)
+    }
+}
+
+enum LineFinder {
+    static func find(_ img: UIImage) -> [AutoSeg] {
+        guard let cg = img.cgImage else { return [] }
+        let req = VNDetectContoursRequest()
+        req.contrastAdjustment = 2.0; req.maximumImageDimension = 1024; req.detectsDarkOnLight = true
+        let h = VNImageRequestHandler(cgImage: cg, orientation: cgOrient(img.imageOrientation))
+        try? h.perform([req])
+        guard let obs = req.results?.first else { return [] }
+        var segs: [AutoSeg] = []
+        func walk(_ c: VNContour) {
+            if let poly = try? c.polygonApproximation(epsilon: 0.004) {
+                let pts = poly.normalizedPoints.map { CGPoint(x: Double($0.x), y: 1 - Double($0.y)) }
+                if pts.count >= 2 { for i in 0..<(pts.count - 1) {
+                    let s = AutoSeg(a: pts[i], b: pts[i + 1]); if s.len > 0.06 { segs.append(s) } } }
+            }
+            for k in c.childContours { walk(k) }
+        }
+        for c in obs.topLevelContours { walk(c) }
+        // 같은 직선(각도 3° · 거리 0.008 안)이면 하나로
+        segs.sort { $0.len > $1.len }
+        var out: [AutoSeg] = []
+        for s in segs {
+            var merged = false
+            for k in out.indices {
+                let o = out[k]
+                var d = abs(s.ang - o.ang).truncatingRemainder(dividingBy: .pi); d = min(d, .pi - d)
+                guard d < 3 * .pi / 180 else { continue }
+                let pa = o.proj(s.a), pb = o.proj(s.b)
+                guard hypot(pa.x - s.a.x, pa.y - s.a.y) < 0.008, hypot(pb.x - s.b.x, pb.y - s.b.y) < 0.008 else { continue }
+                // 직선 방향으로 가장 먼 두 점
+                let all = [o.a, o.b, s.a, s.b], u = CGPoint(x: cos(o.ang), y: sin(o.ang))
+                let tt = all.map { $0.x * u.x + $0.y * u.y }
+                let lo = all[tt.firstIndex(of: tt.min()!)!], hi = all[tt.firstIndex(of: tt.max()!)!]
+                if hypot(hi.x - lo.x, hi.y - lo.y) <= o.len + s.len + 0.03 { out[k] = AutoSeg(a: o.proj(lo), b: o.proj(hi)) }
+                merged = true; break
+            }
+            if !merged { out.append(s) }
+        }
+        return Array(out.sorted { $0.len > $1.len }.prefix(40))
+    }
+    static func cgOrient(_ o: UIImage.Orientation) -> CGImagePropertyOrientation {
+        switch o { case .right: return .right; case .left: return .left; case .down: return .down
+        case .upMirrored: return .upMirrored; case .downMirrored: return .downMirrored; case .leftMirrored: return .leftMirrored
+        case .rightMirrored: return .rightMirrored; default: return .up }
     }
 }
 
@@ -275,6 +339,9 @@ struct MemoEditor: View {
     @AppStorage("memoSnap") private var snapOn = true
     @State private var editLine: IdString?
     @State private var share: URL?
+    @State private var autoSegs: [AutoSeg] = []
+    @State private var pickSeg: Int? = nil          // 고른 자동 선
+    @AppStorage("memoAutoLine") private var autoOn = true
 
     var idx: Int? { store.site.memos.firstIndex { $0.id == memoId } }
 
@@ -288,20 +355,21 @@ struct MemoEditor: View {
                         let fit = fitRect(img.size, in: geo.size)
                         ZStack(alignment: .topLeading) {
                             Image(uiImage: img).resizable().frame(width: fit.width, height: fit.height).offset(x: fit.minX, y: fit.minY)
-                            Canvas { ctx, _ in draw(ctx, store.site.memos[i].lines, fit) }
+                            Canvas { ctx, _ in drawAuto(ctx, fit); draw(ctx, store.site.memos[i].lines, fit) }
                         }
                         .contentShape(Rectangle())
                         .onTapGesture(coordinateSpace: .local) { p in tap(p, fit, i) }
                     }
                     .background(Color.black)
                     HStack {
-                        Toggle("끝점 자동 맞춤", isOn: $snapOn).font(.subheadline).fixedSize()
+                        Toggle("선 자동", isOn: $autoOn).font(.subheadline).fixedSize()
+                        Toggle("끝점 맞춤", isOn: $snapOn).font(.subheadline).fixedSize()
                         Spacer()
-                        Button { if first != nil { first = nil } else if !store.site.memos[i].lines.isEmpty { store.site.memos[i].lines.removeLast() } } label: {
+                        Button { if pickSeg != nil { pickSeg = nil } else if first != nil { first = nil } else if !store.site.memos[i].lines.isEmpty { store.site.memos[i].lines.removeLast() } } label: {
                             Label("되돌리기", systemImage: "arrow.uturn.backward")
                         }
                     }.padding(.horizontal, 16).padding(.vertical, 10)
-                    Text(first == nil ? "선의 시작점을 누르세요 · 선 위 숫자를 누르면 치수 입력" : "끝점을 누르세요")
+                    Text(pickSeg != nil ? "다른 선을 누르면 두 선 사이, 같은 선을 또 누르면 그 선 길이, 빈 곳은 선에서 그 점까지" : first == nil ? (autoOn && !autoSegs.isEmpty ? "하늘색 선을 눌러 고르거나, 점을 찍어 직접 긋기 · 숫자를 누르면 치수 입력" : "선의 시작점을 누르세요 · 선 위 숫자를 누르면 치수 입력") : "끝점을 누르세요")
                         .font(.caption).foregroundStyle(.secondary).padding(.bottom, 10)
                 } else {
                     ProgressView()
@@ -331,7 +399,9 @@ struct MemoEditor: View {
         if let d = m.depth, let data = try? Data(contentsOf: Store.docs.appendingPathComponent(d)) {
             depth = try? JSONDecoder().decode(MemoDepth.self, from: data)
         }
-        if let img { DispatchQueue.global(qos: .userInitiated).async { let s = EdgeSnapper(img); DispatchQueue.main.async { snapper = s } } }
+        if let img { DispatchQueue.global(qos: .userInitiated).async {
+            let s = EdgeSnapper(img), L = LineFinder.find(img)
+            DispatchQueue.main.async { snapper = s; autoSegs = L } } }
     }
 
     func fitRect(_ s: CGSize, in box: CGSize) -> CGRect {
@@ -349,6 +419,32 @@ struct MemoEditor: View {
             }
         }
         guard fit.contains(p) else { return }
+        // 자동 선: 선 고르기 → 두 선 사이 / 그 선 길이 / 선에서 점까지
+        if autoOn, first == nil, !autoSegs.isEmpty {
+            let q = CGPoint(x: (p.x - fit.minX) / fit.width, y: (p.y - fit.minY) / fit.height)
+            var hit: Int? = nil, hd = 18.0
+            for (k, s) in autoSegs.enumerated() {
+                let n = s.near(q), d = hypot((n.x - q.x) * fit.width, (n.y - q.y) * fit.height)
+                if d < hd { hd = d; hit = k }
+            }
+            if let A = pickSeg {
+                let a = autoSegs[A]
+                var line: MemoLine
+                if let B = hit, B == A { line = MemoLine(ax: a.a.x, ay: a.a.y, bx: a.b.x, by: a.b.y) }
+                else if let B = hit {
+                    let b = autoSegs[B]
+                    // 두 선이 겹치는 구간 가운데에서 직각으로
+                    let m = CGPoint(x: (a.a.x + a.b.x) / 2, y: (a.a.y + a.b.y) / 2), mb = CGPoint(x: (b.a.x + b.b.x) / 2, y: (b.a.y + b.b.y) / 2)
+                    let c = CGPoint(x: (m.x + b.proj(m).x + mb.x + a.proj(mb).x) / 4, y: (m.y + b.proj(m).y + mb.y + a.proj(mb).y) / 4)
+                    let pa = a.near(c), pb = b.near(a.near(c))
+                    line = MemoLine(ax: pa.x, ay: pa.y, bx: pb.x, by: pb.y)
+                } else { let pa = a.near(q); line = MemoLine(ax: pa.x, ay: pa.y, bx: q.x, by: q.y) }
+                line.auto = depth?.length(line)
+                store.site.memos[i].lines.append(line); pickSeg = nil
+                editLine = IdString(id: line.id); return
+            }
+            if let h = hit { pickSeg = h; return }
+        }
         var nx = (p.x - fit.minX) / fit.width, ny = (p.y - fit.minY) / fit.height
         if snapOn, let s = snapper { let q = s.snap(nx, ny); nx = q.0; ny = q.1 }
         if let a = first {
@@ -359,6 +455,16 @@ struct MemoEditor: View {
             editLine = IdString(id: l.id)
         } else {
             first = CGPoint(x: nx, y: ny)
+        }
+    }
+
+    func drawAuto(_ ctx: GraphicsContext, _ fit: CGRect) {
+        guard autoOn else { return }
+        for (k, s) in autoSegs.enumerated() {
+            var p = Path(); p.move(to: CGPoint(x: fit.minX + s.a.x * fit.width, y: fit.minY + s.a.y * fit.height))
+            p.addLine(to: CGPoint(x: fit.minX + s.b.x * fit.width, y: fit.minY + s.b.y * fit.height))
+            let on = pickSeg == k
+            ctx.stroke(p, with: .color(on ? Color.orange : Color.cyan.opacity(0.7)), lineWidth: on ? 4 : 1.6)
         }
     }
 
