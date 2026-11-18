@@ -120,6 +120,7 @@ struct PlanTab: View {
     @State private var sketchEdit: IdString?
     @State private var ceilEdit: IdString?
     @State private var aimEdit: IdString?
+    @State private var checking = false
 
     var body: some View {
         ScrollView {
@@ -183,6 +184,7 @@ struct PlanTab: View {
                 BigButton(title: store.site.rooms.isEmpty ? "라이다로 방 스캔" : "다음 방 스캔", icon: "camera.metering.matrix", dark: false) {
                     if RoomCaptureSession.isSupported { scanning = true } else { message = "이 기기는 라이다가 없어 스캔할 수 없습니다. 도면 불러오기를 써 주세요." }
                 }
+                BigButton(title: store.site.checkMissing.isEmpty ? "현장 확인 \(store.site.checkDone)/\(siteCheckItems.count) ✓" : "현장 확인 · 빠진 필수 \(store.site.checkMissing.count)개", icon: "checklist", dark: false) { checking = true }
                 BigButton(title: store.site.memos.isEmpty ? "사진 실측 메모 (점·선·치수)" : "사진 실측 메모 \(store.site.memos.count)개", icon: "ruler", dark: false) { memos = true }
                 HStack(spacing: 10) {
                     BigButton(title: "사진·손도면", icon: "photo", dark: false) { tracing = true }
@@ -210,6 +212,7 @@ struct PlanTab: View {
                         if let u = store.exportAnrakJSON(), let t = try? String(contentsOf: u, encoding: .utf8) {
                             UIPasteboard.general.string = t
                             message = "복사했습니다. 웹앱 실측 화면에서 [스캔 붙여넣기]를 누르세요"
+                            if !store.site.checkMissing.isEmpty { message! += "\n※ 현장 확인 빠진 것: " + store.site.checkMissing.joined(separator: ", ") }
                             if let w = URL(string: webAppURL) { UIApplication.shared.open(w) }
                         }
                     }
@@ -232,6 +235,7 @@ struct PlanTab: View {
         .fullScreenCover(item: $aimEdit) { AutoMeasureScreen(roomId: $0.id).environmentObject(store) }
         .onAppear { LaserLink.shared.wake(); Furn.backfill(store) }
         .fullScreenCover(isPresented: $memos) { MemoListScreen().environmentObject(store) }
+        .sheet(isPresented: $checking) { ChecklistScreen().environmentObject(store) }
         .fullScreenCover(isPresented: $tracing) { TraceScreen().environmentObject(store) }
         .fullScreenCover(item: Binding(get: { preview.map { ShareItem(url: $0) } }, set: { preview = $0?.url })) { Preview3D(url: $0.url) }
         .sheet(item: Binding(get: { share.map { ShareItem(url: $0) } }, set: { share = $0?.url })) { ShareSheet(items: [$0.url]) }

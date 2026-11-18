@@ -23,6 +23,11 @@ struct EstimateTab: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text("견적").font(.title2.weight(.bold)).padding(.horizontal, 4).padding(.top, 8)
+                if !store.site.rooms.isEmpty && !store.site.checkMissing.isEmpty {
+                    Text("현장 확인이 빠졌습니다: " + store.site.checkMissing.joined(separator: ", ") + " · 도면 탭 [현장 확인]에서 채우세요")
+                        .font(.caption).foregroundStyle(Color(red: 0.6, green: 0.35, blue: 0)).padding(10)
+                        .background(Color(red: 1, green: 0.95, blue: 0.85), in: RoundedRectangle(cornerRadius: 10))
+                }
                 if store.site.rooms.isEmpty {
                     Card { Text("도면 탭에서 방을 먼저 스캔하거나 불러오세요. 방 치수로 수량이 자동 계산됩니다.").foregroundStyle(.secondary) }
                 }

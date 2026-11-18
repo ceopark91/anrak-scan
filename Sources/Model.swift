@@ -139,6 +139,7 @@ struct Site: Codable, Identifiable {
     var marginPct: Double = 10
     var vat: Bool = true
     var memos: [MeasureMemo] = []          // 사진 실측 메모
+    var checks: [String: SiteCheck] = [:]  // 현장 확인 목록
 
     init() {}
     init(from d: Decoder) throws {
@@ -155,8 +156,9 @@ struct Site: Codable, Identifiable {
         marginPct = (try? c.decode(Double.self, forKey: .marginPct)) ?? 10
         vat = (try? c.decode(Bool.self, forKey: .vat)) ?? true
         memos = (try? c.decode([MeasureMemo].self, forKey: .memos)) ?? []
+        checks = (try? c.decode([String: SiteCheck].self, forKey: .checks)) ?? [:]
     }
-    enum K: String, CodingKey { case id, name, addr, rooms, offsets, align, turn, est, extras, marginPct, vat, memos }
+    enum K: String, CodingKey { case id, name, addr, rooms, offsets, align, turn, est, extras, marginPct, vat, memos, checks }
 
     /// 벽 방향(길이 가중) 으로 구한 정렬 각도: 이 각도만큼 돌리면 벽이 수평·수직이 됨
     var autoAlign: Double {
