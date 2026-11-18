@@ -115,6 +115,7 @@ struct PlanTab: View {
     @State private var building3D = false
     @State private var memos = false
     @State private var laserSheet = false
+    @State private var sketching = false
 
     var body: some View {
         ScrollView {
@@ -175,6 +176,7 @@ struct PlanTab: View {
                 BigButton(title: store.site.rooms.isEmpty ? "방 스캔 시작" : "다음 방 스캔", icon: "camera.metering.matrix", dark: true) {
                     if RoomCaptureSession.isSupported { scanning = true } else { message = "이 기기는 라이다가 없어 스캔할 수 없습니다. 도면 불러오기를 써 주세요." }
                 }
+                BigButton(title: "손으로 그리기 (치수 넣으면 반듯하게)", icon: "scribble", dark: false) { sketching = true }
                 BigButton(title: store.site.memos.isEmpty ? "사진 실측 메모 (점·선·치수)" : "사진 실측 메모 \(store.site.memos.count)개", icon: "ruler", dark: false) { memos = true }
                 HStack(spacing: 10) {
                     BigButton(title: "사진·손도면", icon: "photo", dark: false) { tracing = true }
@@ -186,15 +188,15 @@ struct PlanTab: View {
                         BigButton(title: "도면 PDF", icon: "doc.richtext", dark: false) { share = Exporter.planPDF(store.site) }
                         BigButton(title: "캐드 DXF", icon: "square.and.pencil", dark: false) { share = Exporter.dxf(store.site) }
                     }
-                    if store.site.rooms.contains(where: { $0.raw != nil }) {
-                        BigButton(title: building3D ? "3D 합치는 중…" : "집 전체 3D 보기", icon: "house", dark: true) {
-                            guard !building3D else { return }
-                            building3D = true
-                            Task {
-                                let (u, note) = await House3D.build(store.site)
-                                building3D = false; message = note
-                                if let u { preview = u }
-                            }
+                    BigButton(title: building3D ? "3D 만드는 중…" : "집 전체 3D 보기", icon: "house", dark: true) {
+                        guard !building3D else { return }
+                        building3D = true
+                        Task {
+                            var u: URL? = nil, note: String? = nil
+                            if store.site.rooms.contains(where: { $0.raw != nil }) { (u, note) = await House3D.build(store.site) }
+                            if u == nil { u = Plan3D.build(store.site.placedRooms, name: store.site.name); note = u == nil ? "3D를 만들지 못했습니다" : nil }
+                            building3D = false; message = note
+                            if let u { preview = u }
                         }
                     }
                     HStack(spacing: 10) {
@@ -209,6 +211,7 @@ struct PlanTab: View {
         .background(bg.ignoresSafeArea())
         .fullScreenCover(isPresented: $scanning) { CaptureScreen().environmentObject(store) }
         .sheet(isPresented: $laserSheet) { LaserSheet() }
+        .fullScreenCover(isPresented: $sketching) { SketchScreen().environmentObject(store) }
         .onAppear { LaserLink.shared.wake() }
         .fullScreenCover(isPresented: $memos) { MemoListScreen().environmentObject(store) }
         .fullScreenCover(isPresented: $tracing) { TraceScreen().environmentObject(store) }
@@ -250,6 +253,7 @@ struct PlanTab: View {
             VStack(alignment: .trailing, spacing: 10) {
                 Button("고치기") { edit = IdString(id: r.id) }.font(.subheadline)
                 if let f = r.usdz { Button("3D 보기") { preview = Store.docs.appendingPathComponent(f) }.font(.subheadline) }
+                else { Button("3D 보기") { preview = Plan3D.build([store.site.placed(r)], name: r.name) }.font(.subheadline) }
                 Button("삭제") { confirmDelete = r }.font(.subheadline).foregroundStyle(.red)
             }
         }

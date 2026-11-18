@@ -1,0 +1,307 @@
+import SwiftUI
+
+// MARK: - 손그림 → 캐드처럼 보정 (웹 안락실측 SK와 같은 계산)
+// 손으로 그린 선을 꺾이는 점만 남기고(RDP) 각 변을 90°(가깝으면 45°)로 맞춘 뒤,
+// 잰 길이 + 그림 비율로 모자란 길이를 풀어 도형을 닫는다 (가중 최소제곱, 닫힘 조건 2개).
+
+struct SkSeg { var dir: Double; var px: Double; var len: Int = 0 }
+struct SkResult { var lens: [Int]; var auto: [Bool]; var ok: Bool; var msg: String }
+
+enum SK {
+    static func norm(_ a: Double) -> Double { var a = a; while a > 180 { a -= 360 }; while a <= -180 { a += 360 }; return a }
+
+    static func rdp(_ p: [CGPoint], _ eps: Double) -> [CGPoint] {
+        guard p.count >= 3 else { return p }
+        let a = p[0], b = p[p.count - 1]
+        let L = max(1e-9, hypot(b.x - a.x, b.y - a.y))
+        var dm = -1.0, idx = 0
+        for i in 1..<(p.count - 1) {
+            let q = p[i]
+            let d = abs((b.x - a.x) * (a.y - q.y) - (a.x - q.x) * (b.y - a.y)) / L
+            if d > dm { dm = d; idx = i }
+        }
+        if dm > eps {
+            let l = rdp(Array(p[0...idx]), eps), r = rdp(Array(p[idx...]), eps)
+            return Array(l.dropLast()) + r
+        }
+        return [a, b]
+    }
+
+    static func diag(_ p: [CGPoint]) -> Double {
+        guard let x0 = p.map(\.x).min(), let x1 = p.map(\.x).max(), let y0 = p.map(\.y).min(), let y1 = p.map(\.y).max() else { return 0 }
+        return hypot(x1 - x0, y1 - y0)
+    }
+
+    static func fromStroke(_ raw: [CGPoint]) -> [SkSeg]? {
+        guard raw.count >= 4 else { return nil }
+        let d = diag(raw); guard d >= 30 else { return nil }
+        var q = rdp(raw, d * 0.035)
+        if q.count > 2, hypot(q[0].x - q[q.count - 1].x, q[0].y - q[q.count - 1].y) < d * 0.12 { q.removeLast() }
+        guard q.count >= 3 else { return nil }
+        return fromCorners(q, d)
+    }
+
+    static func fromCorners(_ input: [CGPoint], _ diag: Double) -> [SkSeg]? {
+        var q = input
+        var s = 0.0
+        for i in 0..<q.count { let a = q[i], b = q[(i + 1) % q.count]; s += a.x * b.y - b.x * a.y }
+        if s < 0 { q = [q[0]] + q.dropFirst().reversed() }
+        var segs = q.indices.map { i -> SkSeg in
+            let a = q[i], b = q[(i + 1) % q.count]
+            return SkSeg(dir: atan2(b.y - a.y, b.x - a.x) * 180 / .pi, px: hypot(b.x - a.x, b.y - a.y))
+        }
+        for i in segs.indices {
+            let g = segs[i].dir, r90 = (g / 90).rounded() * 90, r45 = (g / 45).rounded() * 45
+            segs[i].dir = norm(abs(g - r90) <= 15 ? r90 : abs(g - r45) <= 9 ? r45 : g)
+        }
+        var changed = true
+        while changed && segs.count > 3 {
+            changed = false
+            for i in segs.indices {
+                let j = (i + 1) % segs.count
+                if abs(norm(segs[i].dir - segs[j].dir)) < 0.5 { segs[i].px += segs[j].px; segs.remove(at: j); changed = true; break }
+            }
+            if changed { continue }
+            if let i = segs.firstIndex(where: { $0.px < diag * 0.04 }) { segs.remove(at: i); changed = true }
+        }
+        return segs.count >= 3 ? segs : nil
+    }
+
+    static func solve(_ segs: [SkSeg]) -> SkResult {
+        let n = segs.count
+        let u = segs.map { (cos($0.dir * .pi / 180), sin($0.dir * .pi / 180)) }
+        let K = segs.indices.filter { segs[$0].len > 0 }, U = segs.indices.filter { segs[$0].len <= 0 }
+        guard !K.isEmpty else { return SkResult(lens: Array(repeating: 0, count: n), auto: Array(repeating: true, count: n), ok: false, msg: "벽 하나 이상 길이를 넣어 주세요") }
+        let scale = Double(K.reduce(0) { $0 + segs[$1].len }) / K.reduce(0.0) { $0 + segs[$1].px }
+        var lens = segs.map { Double(max(0, $0.len)) }
+        let V = U.isEmpty ? K : U
+        let x0 = V.map { U.isEmpty ? lens[$0] : segs[$0].px * scale }
+        let w = x0.map { max(1, $0) * max(1, $0) }
+        var b = (0.0, 0.0)
+        for i in 0..<n where !V.contains(i) { b.0 -= lens[i] * u[i].0; b.1 -= lens[i] * u[i].1 }
+        var r = b
+        for (k, i) in V.enumerated() { r.0 -= u[i].0 * x0[k]; r.1 -= u[i].1 * x0[k] }
+        let gap0 = hypot(r.0, r.1)
+        var m00 = 0.0, m01 = 0.0, m11 = 0.0
+        for (k, i) in V.enumerated() { m00 += w[k] * u[i].0 * u[i].0; m01 += w[k] * u[i].0 * u[i].1; m11 += w[k] * u[i].1 * u[i].1 }
+        let det = m00 * m11 - m01 * m01
+        var x = x0
+        if abs(det) > 1e-9 * max(1, m00 * m11) {
+            let l0 = (m11 * r.0 - m01 * r.1) / det, l1 = (-m01 * r.0 + m00 * r.1) / det
+            x = x0.enumerated().map { k, v in v + w[k] * (u[V[k]].0 * l0 + u[V[k]].1 * l1) }
+        } else if m00 + m11 > 0 {
+            let d = u[V[0]], t = (r.0 * d.0 + r.1 * d.1) / (m00 + m11)
+            x = x0.enumerated().map { k, v in v + w[k] * t * (u[V[k]].0 * d.0 + u[V[k]].1 * d.1) }
+        }
+        for (k, i) in V.enumerated() { lens[i] = (x[k] / 10).rounded() * 10 }
+        let out = lens.map { Int($0) }
+        let bad = out.contains { $0 <= 0 }
+        let msg: String
+        if bad { msg = "길이가 맞지 않습니다. 그림이나 넣은 치수를 확인해 주세요" }
+        else if U.isEmpty && gap0 > 60 { msg = "잰 치수끼리 \(Int(gap0))mm 어긋나 고르게 나눴습니다. 한 번 더 재 보세요" }
+        else if U.isEmpty { msg = gap0 > 5 ? "잰 치수 오차 \(Int(gap0))mm를 고르게 나눠 닫았습니다" : "잰 치수로 딱 맞게 닫혔습니다" }
+        else { msg = "\(U.count)개 벽은 그림 비율과 닫힘으로 자동 계산했습니다" }
+        return SkResult(lens: out, auto: segs.indices.map { V.contains($0) }, ok: !bad, msg: msg)
+    }
+
+    static func walls(_ segs: [SkSeg], _ lens: [Int]) -> [AWall] {
+        segs.indices.map { i in
+            let t = (norm(segs[(i + 1) % segs.count].dir - segs[i].dir) * 10).rounded() / 10
+            return AWall(len: lens[i], turn: abs(t - 90) < 0.05 ? "R" : abs(t + 90) < 0.05 ? "L" : String(t), ops: [])
+        }
+    }
+}
+
+// MARK: - 손그림 화면
+
+struct SketchScreen: View {
+    @EnvironmentObject var store: Store
+    @Environment(\.dismiss) var dismiss
+    @ObservedObject var laser = LaserLink.shared
+    @State private var raw: [CGPoint] = []
+    @State private var cur: [CGPoint] = []
+    @State private var taps: [CGPoint] = []
+    @State private var segs: [SkSeg]? = nil
+    @State private var sel = 0
+    @State private var lenText = ""
+    @State private var ceil = 2300
+    @State private var name = "거실"
+    @State private var msg: String?
+    @State private var labelPos: [CGPoint] = []
+    @FocusState private var focus: Bool
+
+    var result: SkResult? { segs.map { SK.solve($0) } }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                GeometryReader { geo in
+                    ZStack {
+                        Color.white
+                        Canvas { ctx, size in drawGrid(ctx, size); draw(ctx, size) }
+                    }
+                    .contentShape(Rectangle())
+                    .gesture(DragGesture(minimumDistance: 0)
+                        .onChanged { v in if segs == nil { cur.append(v.location) } }
+                        .onEnded { v in end(v, geo.size) })
+                }
+                bottom
+            }
+            .background(Color(white: 0.96))
+            .navigationTitle("손그림 방").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("닫기") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) { Button("다시 그리기") { raw = []; cur = []; taps = []; segs = nil; msg = nil } }
+            }
+            .onChange(of: laser.seq) { _, _ in
+                guard let v = laser.lastMM, segs != nil else { return }
+                segs![sel].len = v; next()
+            }
+        }
+    }
+
+    // 그리기 끝 (손 뗌)
+    func end(_ v: DragGesture.Value, _ size: CGSize) {
+        if segs != nil { pick(v.location); return }
+        let moved = hypot(v.translation.width, v.translation.height)
+        if moved < 8 {
+            taps.append(v.location)
+            if taps.count >= 4, hypot(taps[0].x - v.location.x, taps[0].y - v.location.y) < 22 { taps.removeLast(); finish() }
+        } else {
+            raw += cur
+            if raw.count > 20, let a = raw.first, hypot(a.x - v.location.x, a.y - v.location.y) < max(30, SK.diag(raw) * 0.12) { cur = []; finish(); return }
+        }
+        cur = []
+    }
+
+    func finish() {
+        let s = taps.count >= 3 ? SK.fromCorners(taps, max(400, SK.diag(taps))) : SK.fromStroke(raw)
+        guard let s else { msg = "모양을 못 알아봤습니다. 방 둘레를 한 바퀴 크게 그려 주세요"; raw = []; taps = []; return }
+        segs = s; sel = 0; lenText = ""; msg = nil; focus = true
+    }
+
+    func next() {
+        guard let s = segs else { return }
+        if let j = s.indices.first(where: { $0 > sel && s[$0].len <= 0 }) ?? s.indices.first(where: { s[$0].len <= 0 }) { sel = j } else { sel = (sel + 1) % s.count }
+        lenText = s[sel].len > 0 ? "\(s[sel].len)" : ""
+    }
+
+    func pick(_ p: CGPoint) {
+        var best = -1, bd = 44.0
+        for (i, q) in labelPos.enumerated() { let d = hypot(q.x - p.x, q.y - p.y); if d < bd { bd = d; best = i } }
+        if best >= 0, let s = segs { sel = best; lenText = s[best].len > 0 ? "\(s[best].len)" : ""; focus = true }
+    }
+
+    // 보정된 모양 점 (mm 또는 그림 비율)
+    func poly() -> [CGPoint] {
+        guard let s = segs else { return [] }
+        let r = result, has = r.map { $0.lens.allSatisfy { $0 > 0 } } ?? false
+        var x = 0.0, y = 0.0; var P = [CGPoint.zero]
+        for (i, g) in s.enumerated() {
+            let L = has ? Double(r!.lens[i]) : g.px
+            x += cos(g.dir * .pi / 180) * L; y += sin(g.dir * .pi / 180) * L; P.append(CGPoint(x: x, y: y))
+        }
+        return P
+    }
+
+    func drawGrid(_ ctx: GraphicsContext, _ size: CGSize) {
+        var p = Path()
+        stride(from: 0.0, to: size.width, by: 24).forEach { p.move(to: CGPoint(x: $0, y: 0)); p.addLine(to: CGPoint(x: $0, y: size.height)) }
+        stride(from: 0.0, to: size.height, by: 24).forEach { p.move(to: CGPoint(x: 0, y: $0)); p.addLine(to: CGPoint(x: size.width, y: $0)) }
+        ctx.stroke(p, with: .color(Color(white: 0.92)), lineWidth: 1)
+    }
+
+    func draw(_ ctx: GraphicsContext, _ size: CGSize) {
+        let acc = Color(red: 0.25, green: 0.32, blue: 0.28)
+        guard let s = segs else {
+            func path(_ a: [CGPoint]) { guard a.count > 1 else { return }; var p = Path(); p.addLines(a); ctx.stroke(p, with: .color(.gray), style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)) }
+            path(raw); path(cur)
+            for t in taps { ctx.fill(Path(ellipseIn: CGRect(x: t.x - 5, y: t.y - 5, width: 10, height: 10)), with: .color(acc)) }
+            if taps.count > 1 { var p = Path(); p.addLines(taps); ctx.stroke(p, with: .color(acc), lineWidth: 2) }
+            if raw.isEmpty && cur.isEmpty && taps.isEmpty {
+                ctx.draw(Text("방 둘레를 손가락으로 한 바퀴 대충 그리세요\n(또는 모서리를 차례로 눌러 점 찍기)").font(.subheadline).foregroundColor(.gray),
+                         at: CGPoint(x: size.width / 2, y: size.height / 2))
+            }
+            return
+        }
+        let P = poly(), r = result
+        let xs = P.map(\.x), ys = P.map(\.y)
+        let pad = min(80.0, size.width * 0.18)
+        let k = min((size.width - pad * 2) / max(1, xs.max()! - xs.min()!), (size.height - pad * 2) / max(1, ys.max()! - ys.min()!))
+        let ox = (size.width - (xs.max()! - xs.min()!) * k) / 2 - xs.min()! * k, oy = (size.height - (ys.max()! - ys.min()!) * k) / 2 - ys.min()! * k
+        let Q = P.map { CGPoint(x: $0.x * k + ox, y: $0.y * k + oy) }
+        var fill = Path(); fill.addLines(Array(Q.prefix(s.count))); fill.closeSubpath()
+        ctx.fill(fill, with: .color(Color(red: 0.90, green: 0.93, blue: 0.91)))
+        var labels: [CGPoint] = []
+        let has = r.map { $0.lens.allSatisfy { $0 > 0 } } ?? false
+        for (i, g) in s.enumerated() {
+            let a = Q[i], b = Q[i + 1]
+            var p = Path(); p.move(to: a); p.addLine(to: b)
+            ctx.stroke(p, with: .color(i == sel ? acc : .black), style: StrokeStyle(lineWidth: i == sel ? 5 : 3, lineCap: .round))
+            let L = max(1, hypot(b.x - a.x, b.y - a.y)), nx = (b.y - a.y) / L, ny = -(b.x - a.x) / L
+            var c = CGPoint(x: (a.x + b.x) / 2 + nx * 22, y: (a.y + b.y) / 2 + ny * 22)
+            let val = g.len > 0 ? mm(g.len) : has ? "자동 \(mm(r!.lens[i]))" : "?"
+            let t = ctx.resolve(Text("\(i + 1)  \(val)").font(.caption.weight(g.len > 0 ? .bold : .regular)).foregroundColor(i == sel ? .white : g.len > 0 ? .black : .gray))
+            let sz = t.measure(in: CGSize(width: 300, height: 40))
+            c.x = max(sz.width / 2 + 10, min(size.width - sz.width / 2 - 10, c.x)); c.y = max(16, min(size.height - 16, c.y))
+            let box = CGRect(x: c.x - sz.width / 2 - 8, y: c.y - 12, width: sz.width + 16, height: 24)
+            ctx.fill(Path(roundedRect: box, cornerRadius: 12), with: .color(i == sel ? acc : .white))
+            ctx.stroke(Path(roundedRect: box, cornerRadius: 12), with: .color(Color(white: 0.85)), lineWidth: 1)
+            ctx.draw(t, at: c)
+            labels.append(c)
+        }
+        DispatchQueue.main.async { if labels != labelPos { labelPos = labels } }
+    }
+
+    var bottom: some View {
+        VStack(spacing: 10) {
+            if let m = msg { Text(m).font(.caption).foregroundStyle(.red) }
+            if segs == nil {
+                HStack(spacing: 10) {
+                    Button { if !taps.isEmpty { taps.removeLast() } else { raw = [] } } label: { Text("되돌리기").frame(maxWidth: .infinity).padding(.vertical, 13) }
+                        .background(Color(white: 0.93), in: RoundedRectangle(cornerRadius: 12)).foregroundStyle(.black)
+                    Button { finish() } label: { Text("다 그렸어요").fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 13) }
+                        .background(Color.black, in: RoundedRectangle(cornerRadius: 12)).foregroundStyle(.white)
+                        .disabled(raw.count < 10 && taps.count < 3)
+                }
+                Text("대충 그려도 직각·45°로 반듯하게 맞춰 줍니다").font(.caption).foregroundStyle(.secondary)
+            } else if let s = segs {
+                HStack(spacing: 8) {
+                    Text("\(sel + 1)번 벽").fontWeight(.semibold)
+                    TextField(result.map { $0.lens[sel] > 0 ? "자동 \($0.lens[sel])" : "길이 mm" } ?? "길이 mm", text: $lenText)
+                        .keyboardType(.numberPad).focused($focus)
+                        .padding(10).background(Color.white, in: RoundedRectangle(cornerRadius: 10))
+                        .onChange(of: lenText) { _, v in if segs != nil, sel < s.count { segs![sel].len = Int(v.filter(\.isNumber)) ?? 0 } }
+                    Button("다음") { next() }.buttonStyle(.bordered)
+                    if laser.connected { Button("측정") { laser.trigger() }.buttonStyle(.bordered) }
+                }
+                HStack(spacing: 8) {
+                    Text("천장고").font(.subheadline)
+                    TextField("2300", value: $ceil, format: .number).keyboardType(.numberPad).frame(width: 70)
+                        .padding(8).background(Color.white, in: RoundedRectangle(cornerRadius: 10))
+                    Text(result?.msg ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    Spacer(minLength: 0)
+                }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) { ForEach(roomTypes, id: \.self) { t in
+                        Button(t) { name = t }.font(.subheadline).padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(name == t ? Color.black : Color.white, in: Capsule()).foregroundStyle(name == t ? .white : .black)
+                    } }
+                }
+                Button { save() } label: { Text("이 방 저장").fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 13) }
+                    .background(result?.ok == true ? Color.black : Color.gray, in: RoundedRectangle(cornerRadius: 12)).foregroundStyle(.white)
+                    .disabled(result?.ok != true)
+            }
+        }
+        .padding(14)
+        .background(Color(white: 0.96))
+    }
+
+    func save() {
+        guard let s = segs, let r = result, r.ok else { return }
+        let room = ScanRoom(id: uid(), name: name, sessionId: "sketch_" + uid(), x: 0, y: 0, rot: (s[0].dir * 10).rounded() / 10,
+                            ceil: (1500...6000).contains(ceil) ? ceil : 2300, walls: SK.walls(s, r.lens), usdz: nil, date: Date())
+        store.add(room)
+        dismiss()
+    }
+}
