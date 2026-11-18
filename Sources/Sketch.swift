@@ -41,7 +41,7 @@ enum SK {
         return fromCorners(q, d)
     }
 
-    static func fromCorners(_ input: [CGPoint], _ diag: Double) -> [SkSeg]? {
+    static func fromCorners(_ input: [CGPoint], _ diag: Double, taps: Bool = false) -> [SkSeg]? {
         var q = input
         var s = 0.0
         for i in 0..<q.count { let a = q[i], b = q[(i + 1) % q.count]; s += Double(a.x * b.y - b.x * a.y) }
@@ -73,7 +73,7 @@ enum SK {
             if changed { continue }
             var mi = -1
             for (i, g) in segs.enumerated() {
-                let short = g.px < diag * 0.08 || (!snapped[i] && g.px < diag * 0.15) || (!isAxis(g.dir) && g.px < diag * 0.12)
+                let short = g.px < diag * (taps ? 0.02 : 0.08) || (!taps && !snapped[i] && g.px < diag * 0.15) || (!taps && !isAxis(g.dir) && g.px < diag * 0.12)
                 if short && (mi < 0 || g.px < segs[mi].px) { mi = i }
             }
             if mi >= 0 { segs.remove(at: mi); snapped.remove(at: mi); changed = true }
@@ -82,7 +82,7 @@ enum SK {
         let xs = q.map { Double($0.x) }, ys = q.map { Double($0.y) }
         let w = xs.max()! - xs.min()!, h = ys.max()! - ys.min()!
         let fillR = abs(s) / 2 / max(1, w * h)
-        if fillR > 0.9, segs.allSatisfy({ isAxis($0.dir) }), segs.count != 4 {
+        if !taps, fillR > 0.97, segs.allSatisfy({ isAxis($0.dir) }), segs.count != 4 {
             segs = [SkSeg(dir: 0, px: w), SkSeg(dir: 90, px: h), SkSeg(dir: 180, px: w), SkSeg(dir: -90, px: h)]
         }
         return segs.count >= 3 ? segs : nil
@@ -196,7 +196,7 @@ struct SketchScreen: View {
     }
 
     func finish() {
-        let s = taps.count >= 3 ? SK.fromCorners(taps, max(400, SK.diag(taps))) : SK.fromStroke(raw)
+        let s = taps.count >= 3 ? SK.fromCorners(taps, max(400, SK.diag(taps)), taps: true) : SK.fromStroke(raw)
         guard let s else { msg = "모양을 못 알아봤습니다. 방 둘레를 한 바퀴 크게 그려 주세요"; raw = []; taps = []; return }
         segs = s; sel = 0; lenText = ""; msg = nil; focus = true
     }
@@ -275,23 +275,47 @@ struct SketchScreen: View {
         let Q = P.map { CGPoint(x: $0.x * k + ox, y: $0.y * k + oy) }
         var fill = Path(); fill.addLines(Array(Q.prefix(s.count))); fill.closeSubpath()
         ctx.fill(fill, with: .color(Color(red: 0.90, green: 0.93, blue: 0.91)))
-        var labels: [CGPoint] = []
+        var labels = Array(repeating: CGPoint.zero, count: s.count)
         let has = r.map { $0.lens.allSatisfy { $0 > 0 } } ?? false
-        for (i, g) in s.enumerated() {
+        for i in s.indices {
             let a = Q[i], b = Q[i + 1]
             var p = Path(); p.move(to: a); p.addLine(to: b)
             ctx.stroke(p, with: .color(i == sel ? acc : .black), style: StrokeStyle(lineWidth: i == sel ? 5 : 3, lineCap: .round))
-            let L = max(1, hypot(b.x - a.x, b.y - a.y)), nx = (b.y - a.y) / L, ny = -(b.x - a.x) / L
-            var c = CGPoint(x: (a.x + b.x) / 2 + nx * 22, y: (a.y + b.y) / 2 + ny * 22)
+        }
+        // 이름표: 짧은 벽부터 겹치지 않는 자리를 찾고, 멀리 밀리면 벽까지 지시선
+        var boxes: [CGRect] = []
+        let order = s.indices.sorted { hypot(Q[$0 + 1].x - Q[$0].x, Q[$0 + 1].y - Q[$0].y) < hypot(Q[$1 + 1].x - Q[$1].x, Q[$1 + 1].y - Q[$1].y) }
+        var drawn: [(Int, GraphicsContext.ResolvedText, CGRect, CGPoint, Bool)] = []
+        for i in order {
+            let g = s[i], a = Q[i], b = Q[i + 1]
+            let L = max(1, hypot(b.x - a.x, b.y - a.y)), nx = (b.y - a.y) / L, ny = -(b.x - a.x) / L, tx = (b.x - a.x) / L, ty = (b.y - a.y) / L
+            let m = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
             let val = g.len > 0 ? mm(g.len) : has ? "자동 \(mm(r!.lens[i]))" : "?"
             let t = ctx.resolve(Text("\(i + 1)  \(val)").font(.caption.weight(g.len > 0 ? .bold : .regular)).foregroundColor(i == sel ? .white : g.len > 0 ? .black : .gray))
-            let sz = t.measure(in: CGSize(width: 300, height: 40))
-            c.x = max(sz.width / 2 + 10, min(size.width - sz.width / 2 - 10, c.x)); c.y = max(16, min(size.height - 16, c.y))
-            let box = CGRect(x: c.x - sz.width / 2 - 8, y: c.y - 12, width: sz.width + 16, height: 24)
+            let sz = t.measure(in: CGSize(width: 300, height: 40)); let bw = sz.width + 16
+            var cands: [(CGFloat, CGFloat)] = []
+            for d in [22.0, 46, 70, 96, 124, 154] { for k in [0.0, -0.6, 0.6, -1.2, 1.2] { cands.append((d, k * bw)) } }
+            cands += [(-30, 0), (-56, 0)]
+            var pick: (CGRect, Bool)? = nil
+            for (d, k) in cands {
+                let c = CGPoint(x: m.x + nx * d + tx * k, y: m.y + ny * d + ty * k)
+                let box = CGRect(x: c.x - bw / 2, y: c.y - 12, width: bw, height: 24)
+                let inside = box.minX > 2 && box.minY > 2 && box.maxX < size.width - 2 && box.maxY < size.height - 2
+                if inside && !boxes.contains(where: { $0.insetBy(dx: -4, dy: -4).intersects(box) }) { pick = (box, d > 30 || abs(k) > 1); break }
+            }
+            let box = pick?.0 ?? CGRect(x: min(size.width - bw - 4, max(4, m.x + nx * 22 - bw / 2)), y: min(size.height - 28, max(4, m.y + ny * 22 - 12)), width: bw, height: 24)
+            boxes.append(box); labels[i] = CGPoint(x: box.midX, y: box.midY)
+            drawn.append((i, t, box, m, pick?.1 ?? false))
+        }
+        for (i, t, box, m, lead) in drawn {
+            if lead {
+                var p = Path(); p.move(to: m); p.addLine(to: CGPoint(x: box.midX, y: box.midY))
+                ctx.stroke(p, with: .color(i == sel ? acc : .gray), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                ctx.fill(Path(ellipseIn: CGRect(x: m.x - 3, y: m.y - 3, width: 6, height: 6)), with: .color(i == sel ? acc : .gray))
+            }
             ctx.fill(Path(roundedRect: box, cornerRadius: 12), with: .color(i == sel ? acc : .white))
             ctx.stroke(Path(roundedRect: box, cornerRadius: 12), with: .color(Color(white: 0.85)), lineWidth: 1)
-            ctx.draw(t, at: c)
-            labels.append(c)
+            ctx.draw(t, at: CGPoint(x: box.midX, y: box.midY))
         }
         DispatchQueue.main.async { if labels != labelPos { labelPos = labels } }
     }
