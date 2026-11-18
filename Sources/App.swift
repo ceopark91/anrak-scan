@@ -120,6 +120,7 @@ struct PlanTab: View {
     @State private var sketchEdit: IdString?
     @State private var ceilEdit: IdString?
     @State private var aimEdit: IdString?
+    @State private var flatOpen = false
     @State private var checking = false
 
     var body: some View {
@@ -216,6 +217,14 @@ struct PlanTab: View {
                             if let w = URL(string: webAppURL) { UIApplication.shared.open(w) }
                         }
                     }
+                    BigButton(title: "도배계산기로 보내기 (복사 → 계산기에서 붙여넣기)", icon: "ruler", dark: false) {
+                        if let j = WallpaperLink.json(store.site) {
+                            UIPasteboard.general.string = j.text
+                            message = "\(j.sent)개 방을 복사했습니다. 도배계산기에서 [안락 스캔 붙여넣기]를 누르세요"
+                            if !j.skipped.isEmpty { message! += "\n※ 사선 벽이 있어 빠진 방: " + j.skipped.joined(separator: ", ") }
+                            if let w = URL(string: WallpaperLink.appURL) { UIApplication.shared.open(w) }
+                        } else { message = "보낼 수 있는 방이 없습니다 (직각 방만 보낼 수 있어요)" }
+                    }
                     HStack(spacing: 10) {
                         BigButton(title: "안락실측", icon: "square.and.arrow.up", dark: false) { share = store.exportAnrakJSON() }
                         BigButton(title: "3D STL", icon: "cube", dark: false) { share = STLExport.build(store: store) }
@@ -233,6 +242,7 @@ struct PlanTab: View {
         .fullScreenCover(item: $sketchEdit) { SketchScreen(editRoomId: $0.id).environmentObject(store) }
         .fullScreenCover(item: $ceilEdit) { CeilingScreen(roomId: $0.id).environmentObject(store) }
         .fullScreenCover(item: $aimEdit) { AutoMeasureScreen(roomId: $0.id).environmentObject(store) }
+        .fullScreenCover(isPresented: $flatOpen) { FlatnessScreen() }
         .onAppear { LaserLink.shared.wake(); Furn.backfill(store) }
         .fullScreenCover(isPresented: $memos) { MemoListScreen().environmentObject(store) }
         .sheet(isPresented: $checking) { ChecklistScreen().environmentObject(store) }
@@ -277,6 +287,7 @@ struct PlanTab: View {
                 Button("도면 고치기") { sketchEdit = IdString(id: r.id) }.font(.subheadline.weight(.semibold))
                 Button("겨눠서 재기") { aimEdit = IdString(id: r.id) }.font(.subheadline)
                 Button("천장·몰딩") { ceilEdit = IdString(id: r.id) }.font(.subheadline)
+                Button("벽 휨 보기") { flatOpen = true }.font(.subheadline)
                 Button("방 정보") { edit = IdString(id: r.id) }.font(.subheadline)
                 Button("3D 보기") { preview = Plan3D.build([store.site.placed(r)], name: r.name) }.font(.subheadline)
                 if let f = r.usdz { Button("스캔 원본 3D") { preview = Store.docs.appendingPathComponent(f) }.font(.caption) }

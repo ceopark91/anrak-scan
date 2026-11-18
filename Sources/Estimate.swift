@@ -145,15 +145,18 @@ enum Calc {
         return Int(ceil(Double(n) * Double(100 + pct) / 100))
     }
 
-    /// 우물천장 옆면 장 목록: 둘레 / 폭, 길이 = 깊이 + 100
-    static func wellStrips(_ r: ScanRoom, width: Int) -> [Int] {
-        guard (r.ceilT ?? "flat") == "well" else { return [] }
-        var out: [Int] = []
+    /// 우물천장 (도배계산기와 같은 계산): 우물을 가로지르는 천장 장은 깊이×2 더 길고,
+    /// 장과 나란한 두 옆면은 ceil(2·깊이/폭)장, 길이 = 우물 길이 + 100
+    static func wellStrips(_ r: ScanRoom, width: Int) -> (extra: [Int], sides: [Int]) {
+        guard (r.ceilT ?? "flat") == "well" else { return ([], []) }
+        let (A, B) = r.ceilingBox
+        var extra: [Int] = [], sides: [Int] = []
         for w in r.wells ?? [] where w.d > 0 {
-            let n = Int(ceil(Double(2 * (w.a + w.b)) / Double(width)))
-            out += Array(repeating: w.d + 100, count: n)
+            let along = A >= B ? w.a : w.b, across = A >= B ? w.b : w.a
+            extra += Array(repeating: 2 * w.d, count: Int(ceil(Double(across) / Double(width))))
+            sides += Array(repeating: along + 100, count: Int(ceil(Double(2 * w.d) / Double(width))))
         }
-        return out
+        return (extra, sides)
     }
 
     static func wallStrips(_ r: ScanRoom, width: Int) -> [Int] {
@@ -217,12 +220,13 @@ enum Calc {
         }
         // 천장
         if let sp = paperSpec(s.ceil) {
-            let st = ceilStrips(r, width: sp.width)
-            let ws = wellStrips(r, width: sp.width)
+            var st = ceilStrips(r, width: sp.width)
+            let wl = wellStrips(r, width: sp.width), ws = wl.sides
+            for (k, e) in wl.extra.enumerated() where k < st.count { st[k] += e }
             let fx = (r.fixtures ?? []).count + (r.marks ?? []).count
             let n = withLoss(rolls(st + ws, rollLen: sp.roll), s.loss)
             var note = "\(st.count)장 × \(mm(st.first ?? 0))"
-            if !ws.isEmpty { note += " · 우물 옆면 \(ws.count)장" }
+            if !ws.isEmpty { note += " · 우물 옆 \(ws.count)장" }
             if fx > 0 { note += " · 천장 기물 \(fx)개 따내기" }
             if s.loss > 0 { note += " · 로스 \(s.loss)%" }
             add(sp.key, Double(n), note, tag: ".c")
