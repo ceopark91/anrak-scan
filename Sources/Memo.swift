@@ -115,6 +115,7 @@ final class EdgeSnapper {
 
 // MARK: 라이다 사진 찍기
 
+@MainActor
 final class MemoCamera: NSObject, ObservableObject {
     let view = ARSCNView(frame: .zero)
     var hasDepth: Bool { ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) }
