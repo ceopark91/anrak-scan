@@ -119,6 +119,7 @@ struct PlanTab: View {
     @State private var sketching = false
     @State private var sketchEdit: IdString?
     @State private var ceilEdit: IdString?
+    @State private var aimEdit: IdString?
 
     var body: some View {
         ScrollView {
@@ -227,6 +228,7 @@ struct PlanTab: View {
         .fullScreenCover(isPresented: $sketching) { SketchScreen().environmentObject(store) }
         .fullScreenCover(item: $sketchEdit) { SketchScreen(editRoomId: $0.id).environmentObject(store) }
         .fullScreenCover(item: $ceilEdit) { CeilingScreen(roomId: $0.id).environmentObject(store) }
+        .fullScreenCover(item: $aimEdit) { AutoMeasureScreen(roomId: $0.id).environmentObject(store) }
         .onAppear { LaserLink.shared.wake() }
         .fullScreenCover(isPresented: $memos) { MemoListScreen().environmentObject(store) }
         .fullScreenCover(isPresented: $tracing) { TraceScreen().environmentObject(store) }
@@ -267,6 +269,7 @@ struct PlanTab: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 10) {
                 Button("도면 고치기") { sketchEdit = IdString(id: r.id) }.font(.subheadline.weight(.semibold))
+                Button("겨눠서 재기") { aimEdit = IdString(id: r.id) }.font(.subheadline)
                 Button("천장·몰딩") { ceilEdit = IdString(id: r.id) }.font(.subheadline)
                 Button("방 정보") { edit = IdString(id: r.id) }.font(.subheadline)
                 if let f = r.usdz { Button("3D 보기") { preview = Store.docs.appendingPathComponent(f) }.font(.subheadline) }
