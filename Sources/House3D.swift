@@ -2,6 +2,7 @@ import Foundation
 import RoomPlan
 
 /// 같은 스캔(같은 좌표)으로 찍은 방들을 합쳐 집 전체 3D(USDZ)를 만든다.
+@MainActor
 enum House3D {
     static func build(_ site: Site) async -> (URL?, String?) {
         // 방이 가장 많은 스캔 묶음
