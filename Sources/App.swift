@@ -113,6 +113,7 @@ struct PlanTab: View {
     @State private var confirmSiteDelete = false
     @State private var zoomPlan = false
     @State private var building3D = false
+    @State private var memos = false
 
     var body: some View {
         ScrollView {
@@ -172,6 +173,7 @@ struct PlanTab: View {
                 BigButton(title: store.site.rooms.isEmpty ? "방 스캔 시작" : "다음 방 스캔", icon: "camera.metering.matrix", dark: true) {
                     if RoomCaptureSession.isSupported { scanning = true } else { message = "이 기기는 라이다가 없어 스캔할 수 없습니다. 도면 불러오기를 써 주세요." }
                 }
+                BigButton(title: store.site.memos.isEmpty ? "사진 실측 메모 (점·선·치수)" : "사진 실측 메모 \(store.site.memos.count)개", icon: "ruler", dark: false) { memos = true }
                 HStack(spacing: 10) {
                     BigButton(title: "사진·손도면", icon: "photo", dark: false) { tracing = true }
                     BigButton(title: "캐드(DXF)", icon: "doc.badge.plus", dark: false) { importing = true }
@@ -204,6 +206,7 @@ struct PlanTab: View {
         }
         .background(bg.ignoresSafeArea())
         .fullScreenCover(isPresented: $scanning) { CaptureScreen().environmentObject(store) }
+        .fullScreenCover(isPresented: $memos) { MemoListScreen().environmentObject(store) }
         .fullScreenCover(isPresented: $tracing) { TraceScreen().environmentObject(store) }
         .fullScreenCover(item: Binding(get: { preview.map { ShareItem(url: $0) } }, set: { preview = $0?.url })) { Preview3D(url: $0.url) }
         .sheet(item: Binding(get: { share.map { ShareItem(url: $0) } }, set: { share = $0?.url })) { ShareSheet(items: [$0.url]) }

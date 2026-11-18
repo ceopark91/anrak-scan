@@ -116,6 +116,7 @@ struct Site: Codable, Identifiable {
     var extras: [ExtraLine] = []
     var marginPct: Double = 10
     var vat: Bool = true
+    var memos: [MeasureMemo] = []          // 사진 실측 메모
 
     init() {}
     init(from d: Decoder) throws {
@@ -131,8 +132,9 @@ struct Site: Codable, Identifiable {
         extras = (try? c.decode([ExtraLine].self, forKey: .extras)) ?? []
         marginPct = (try? c.decode(Double.self, forKey: .marginPct)) ?? 10
         vat = (try? c.decode(Bool.self, forKey: .vat)) ?? true
+        memos = (try? c.decode([MeasureMemo].self, forKey: .memos)) ?? []
     }
-    enum K: String, CodingKey { case id, name, addr, rooms, offsets, align, turn, est, extras, marginPct, vat }
+    enum K: String, CodingKey { case id, name, addr, rooms, offsets, align, turn, est, extras, marginPct, vat, memos }
 
     /// 벽 방향(길이 가중) 으로 구한 정렬 각도: 이 각도만큼 돌리면 벽이 수평·수직이 됨
     var autoAlign: Double {
@@ -204,6 +206,7 @@ final class Store: ObservableObject {
     /// 지금 현장을 지우고 다른 현장(없으면 빈 현장)을 연다
     func deleteCurrentSite() {
         for r in site.rooms { for f in [r.usdz, r.raw].compactMap({ $0 }) { try? FileManager.default.removeItem(at: Store.docs.appendingPathComponent(f)) } }
+        for m in site.memos { for f in [m.photo, m.depth].compactMap({ $0 }) { try? FileManager.default.removeItem(at: Store.docs.appendingPathComponent(f)) } }
         if others.isEmpty { site = Site() } else { var o = others; let next = o.removeFirst(); others = o; site = next }
     }
 
