@@ -118,6 +118,7 @@ struct PlanTab: View {
     @State private var laserSheet = false
     @State private var sketching = false
     @State private var sketchEdit: IdString?
+    @State private var ceilEdit: IdString?
 
     var body: some View {
         ScrollView {
@@ -225,6 +226,7 @@ struct PlanTab: View {
         .onChange(of: store.openScan) { _, v in if v { store.openScan = false; if RoomCaptureSession.isSupported { scanning = true } } }
         .fullScreenCover(isPresented: $sketching) { SketchScreen().environmentObject(store) }
         .fullScreenCover(item: $sketchEdit) { SketchScreen(editRoomId: $0.id).environmentObject(store) }
+        .fullScreenCover(item: $ceilEdit) { CeilingScreen(roomId: $0.id).environmentObject(store) }
         .onAppear { LaserLink.shared.wake() }
         .fullScreenCover(isPresented: $memos) { MemoListScreen().environmentObject(store) }
         .fullScreenCover(isPresented: $tracing) { TraceScreen().environmentObject(store) }
@@ -259,12 +261,13 @@ struct PlanTab: View {
                     Text("천장: " + fixtureKinds.compactMap { k in r.count(k.0) > 0 ? "\(k.1) \(r.count(k.0))" : nil }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
                 }
                 if r.gap > 60 { Text("벽 길이가 서로 안 맞습니다 (끝점 \(mm(r.gap))mm 어긋남)").font(.caption).foregroundStyle(.red) }
-                Text("몰딩 \(moldName(r.moldType)) · 걸레받이 \((r.baseH ?? 0) == 0 ? "없음" : "\(r.baseH ?? 0)mm") · 도배 높이 \(mm(r.paperH))")
+                Text((r.mold?.k == "crown" ? "각몰딩 \(r.mold!.w)·\(r.mold!.a)°" : "몰딩 \(moldName(r.moldType))") + (r.ceilT == "well" ? " · 우물 \((r.wells ?? []).count)" : "") + ((r.marks ?? []).isEmpty ? "" : " · 조명 \((r.marks ?? []).filter { $0.k == "light" }.count) · 실링팬 \((r.marks ?? []).filter { $0.k == "fan" }.count)") + " · 걸레받이 \((r.baseH ?? 0) == 0 ? "없음" : "\(r.baseH ?? 0)mm") · 도배 높이 \(mm(r.paperH))")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 10) {
                 Button("도면 고치기") { sketchEdit = IdString(id: r.id) }.font(.subheadline.weight(.semibold))
+                Button("천장·몰딩") { ceilEdit = IdString(id: r.id) }.font(.subheadline)
                 Button("방 정보") { edit = IdString(id: r.id) }.font(.subheadline)
                 if let f = r.usdz { Button("3D 보기") { preview = Store.docs.appendingPathComponent(f) }.font(.subheadline) }
                 else { Button("3D 보기") { preview = Plan3D.build([store.site.placed(r)], name: r.name) }.font(.subheadline) }

@@ -161,7 +161,10 @@ struct RoomEditSheet: View {
         r.name = name.isEmpty ? r.name : name
         if walls.count == r.walls.count, walls.allSatisfy({ $0.len > 0 }) { r.walls = walls }
         r.fixtures = fixtures
-        r.moldType = mold; r.moldH = mold == "none" ? 0 : moldH; r.baseH = max(0, base)
+        let nm = mold == "none" ? 0 : moldH
+        if r.mold != nil && (r.moldType != mold || r.moldH != nm) { r.mold = AMold(k: mold == "none" ? "none" : "flat", h: nm) }
+        r.moldType = mold; r.moldH = nm; r.baseH = max(0, base)
+        if r.bb != nil { r.bb = r.baseH }
         if ceil > 1500, ceil < 6000 { r.ceil = ceil }
         store.site.rooms[i] = r
     }

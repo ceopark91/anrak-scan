@@ -22,6 +22,13 @@ let fixtureKinds: [(String, String)] = [("light", "조명"), ("down", "매입등
                                         ("detector", "화재감지기"), ("vent", "환기구"), ("hatch", "점검구"), ("etc", "기타")]
 func fixtureName(_ k: String) -> String { fixtureKinds.first { $0.0 == k }?.1 ?? "기타" }
 
+/// 도배계산기·웹앱과 같은 이름(단위 mm). 몰딩 k: none | flat(평몰딩, h=벽 높이) | crown(각몰딩, w=폭, a=각도)
+struct AMold: Codable, Hashable { var k: String = "none"; var h: Int = 40; var w: Int = 60; var a: Int = 45 }
+/// 우물천장: 방이 감싸는 네모 왼쪽 위에서 x,y, 가로 a, 세로 b, 깊이 d
+struct AWell: Codable, Hashable { var x: Int; var y: Int; var a: Int; var b: Int; var d: Int = 120 }
+/// 천장 조명(light)·실링팬(fan): 방이 감싸는 네모 왼쪽 위에서 x,y
+struct AMark: Codable, Hashable { var k: String; var x: Int; var y: Int }
+
 struct AWall: Codable, Hashable {
     var len: Int
     var turn: String   // "R", "L" 또는 "123.4"
@@ -51,6 +58,12 @@ struct ScanRoom: Codable, Identifiable, Hashable {
     var moldType: String? = nil   // 현재 천장 몰딩: none, flat, step, minus
     var moldH: Int? = nil         // 몰딩 높이(mm)
     var baseH: Int? = nil         // 현재 걸레받이 높이(mm), 0이면 없음
+    var mold: AMold? = nil        // 몰딩 자세히(각몰딩 각도 등) → moldH 자동
+    var bb: Int? = nil            // 걸레받이 높이 (baseH와 같게 유지)
+    var bbT: Int? = nil           // 걸레받이 두께
+    var ceilT: String? = nil      // flat | well
+    var wells: [AWell]? = nil
+    var marks: [AMark]? = nil
     /// 도배하는 벽 높이 = 천장 높이 − 몰딩 − 걸레받이
     var paperH: Int { max(300, ceil - ((moldType ?? "none") == "none" ? 0 : (moldH ?? 0)) - (baseH ?? 0)) }
     var date: Date
@@ -73,6 +86,14 @@ struct ScanRoom: Codable, Identifiable, Hashable {
         let dx = p.x - x, dy = p.y - y
         return CGPoint(x: dx * c - dy * s, y: dx * s + dy * c)
     }
+    /// 몰딩이 벽에 내려오는 높이 / 천장에 나오는 폭
+    var moldDrop: Int { guard let m = mold else { return (moldType ?? "none") == "none" ? 0 : (moldH ?? 0) }
+        return m.k == "flat" ? m.h : m.k == "crown" ? Int((Double(m.w) * sin(Double(m.a) * .pi / 180)).rounded()) : 0 }
+    var moldProj: Int { guard let m = mold, m.k == "crown" else { return 0 }; return Int((Double(m.w) * cos(Double(m.a) * .pi / 180)).rounded()) }
+    /// 방이 감싸는 네모(방 좌표)
+    var box: CGRect { let p = localPoints().prefix(walls.count); let xs = p.map(\.x), ys = p.map(\.y)
+        guard let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(), let y1 = ys.max() else { return .zero }
+        return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0) }
     func count(_ kind: String) -> Int { (fixtures ?? []).filter { $0.kind == kind }.count }
     /// 방 좌표 → 도면 좌표 (안락실측 xf())
     func toPlan(_ p: CGPoint, dx: Double = 0, dy: Double = 0) -> CGPoint {
@@ -254,6 +275,11 @@ final class Store: ObservableObject {
                     return ["len": w.len, "turn": turn,
                             "ops": w.ops.map { ["id": $0.id, "kind": $0.kind, "off": $0.off, "w": $0.w, "h": $0.h, "sill": $0.sill] }]
                 },
+                "mold": ["k": (r.mold ?? AMold(k: (r.moldType ?? "none") == "none" ? "none" : "flat", h: r.moldH ?? 40)).k,
+                         "h": (r.mold?.h ?? r.moldH ?? 40), "w": r.mold?.w ?? 60, "a": r.mold?.a ?? 45],
+                "bb": r.bb ?? r.baseH ?? 0, "bbT": r.bbT ?? 9, "ceilT": r.ceilT ?? "flat",
+                "wells": (r.wells ?? []).map { ["x": $0.x, "y": $0.y, "a": $0.a, "b": $0.b, "d": $0.d] },
+                "marks": (r.marks ?? []).map { ["k": $0.k, "x": $0.x, "y": $0.y] },
                 "memo": "안락 스캔(라이다)으로 잰 치수 · 오차 ±2cm 안팎, 시공 전 주요 치수는 줄자로 확인",
                 "photos": [Any]()
             ]

@@ -187,7 +187,7 @@ enum Calc {
         // 천장
         if let sp = paperSpec(s.ceil) {
             let st = ceilStrips(r, width: sp.width)
-            let fx = (r.fixtures ?? []).count
+            let fx = (r.fixtures ?? []).count + (r.marks ?? []).count
             add(sp.key, Double(rolls(st, rollLen: sp.roll)), "\(st.count)장 × \(mm(st.first ?? 0))" + (fx > 0 ? " · 천장 기물 \(fx)개 따내기" : ""), tag: ".c")
         } else if s.ceil == "paint" {
             add("paint", (ceilArea * 10).rounded() / 10, "천장 면적", tag: ".c")
