@@ -44,25 +44,46 @@ enum SK {
     static func fromCorners(_ input: [CGPoint], _ diag: Double) -> [SkSeg]? {
         var q = input
         var s = 0.0
-        for i in 0..<q.count { let a = q[i], b = q[(i + 1) % q.count]; s += a.x * b.y - b.x * a.y }
+        for i in 0..<q.count { let a = q[i], b = q[(i + 1) % q.count]; s += Double(a.x * b.y - b.x * a.y) }
         if s < 0 { q = [q[0]] + q.dropFirst().reversed() }
         var segs = q.indices.map { i -> SkSeg in
             let a = q[i], b = q[(i + 1) % q.count]
             return SkSeg(dir: Double(atan2(b.y - a.y, b.x - a.x)) * 180 / Double.pi, px: Double(hypot(b.x - a.x, b.y - a.y)))
         }
+        var snapped = Array(repeating: true, count: segs.count)
         for i in segs.indices {
             let g = segs[i].dir, r90 = (g / 90).rounded() * 90, r45 = (g / 45).rounded() * 45
-            segs[i].dir = norm(abs(g - r90) <= 15 ? r90 : abs(g - r45) <= 9 ? r45 : g)
+            if abs(g - r90) <= 20 { segs[i].dir = norm(r90) } else if abs(g - r45) <= 25 { segs[i].dir = norm(r45) } else { snapped[i] = false }
         }
+        func isAxis(_ d: Double) -> Bool { abs(d / 90 - (d / 90).rounded()) < 0.01 }
+        // 정리: 같은 방향은 합치고, 되돌아간 선(겹친 시작·끝)은 빼고, 짧은 변은 없앰
         var changed = true
         while changed && segs.count > 3 {
             changed = false
             for i in segs.indices {
                 let j = (i + 1) % segs.count
-                if abs(norm(segs[i].dir - segs[j].dir)) < 0.5 { segs[i].px += segs[j].px; segs.remove(at: j); changed = true; break }
+                let d = abs(norm(segs[i].dir - segs[j].dir))
+                if d < 0.5 { segs[i].px += segs[j].px; segs.remove(at: j); snapped.remove(at: j); changed = true; break }
+                if abs(d - 180) < 0.5 {
+                    let net = segs[i].px - segs[j].px
+                    if net < 0 { segs[i].dir = segs[j].dir; snapped[i] = snapped[j] }
+                    segs[i].px = abs(net); segs.remove(at: j); snapped.remove(at: j); changed = true; break
+                }
             }
             if changed { continue }
-            if let i = segs.firstIndex(where: { $0.px < diag * 0.04 }) { segs.remove(at: i); changed = true }
+            var mi = -1
+            for (i, g) in segs.enumerated() {
+                let short = g.px < diag * 0.08 || (!snapped[i] && g.px < diag * 0.15) || (!isAxis(g.dir) && g.px < diag * 0.12)
+                if short && (mi < 0 || g.px < segs[mi].px) { mi = i }
+            }
+            if mi >= 0 { segs.remove(at: mi); snapped.remove(at: mi); changed = true }
+        }
+        // 누가 봐도 네모: 감싸는 네모를 거의 채우고 모두 가로·세로면 네모로
+        let xs = q.map { Double($0.x) }, ys = q.map { Double($0.y) }
+        let w = xs.max()! - xs.min()!, h = ys.max()! - ys.min()!
+        let fillR = abs(s) / 2 / max(1, w * h)
+        if fillR > 0.9, segs.allSatisfy({ isAxis($0.dir) }), segs.count != 4 {
+            segs = [SkSeg(dir: 0, px: w), SkSeg(dir: 90, px: h), SkSeg(dir: 180, px: w), SkSeg(dir: -90, px: h)]
         }
         return segs.count >= 3 ? segs : nil
     }
