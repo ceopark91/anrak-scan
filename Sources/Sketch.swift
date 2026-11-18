@@ -48,7 +48,7 @@ enum SK {
         if s < 0 { q = [q[0]] + q.dropFirst().reversed() }
         var segs = q.indices.map { i -> SkSeg in
             let a = q[i], b = q[(i + 1) % q.count]
-            return SkSeg(dir: atan2(b.y - a.y, b.x - a.x) * 180 / .pi, px: hypot(b.x - a.x, b.y - a.y))
+            return SkSeg(dir: Double(atan2(b.y - a.y, b.x - a.x)) * 180 / Double.pi, px: Double(hypot(b.x - a.x, b.y - a.y)))
         }
         for i in segs.indices {
             let g = segs[i].dir, r90 = (g / 90).rounded() * 90, r45 = (g / 45).rounded() * 45
