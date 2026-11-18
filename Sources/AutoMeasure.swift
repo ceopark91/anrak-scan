@@ -53,11 +53,26 @@ enum AutoFit {
         }
         let m = A.count
         // r = b - A x0,  M = A W A^T,  M λ = r,  x = x0 + W A^T λ
-        let r = (0..<m).map { i in b[i] - (0..<n).reduce(0) { $0 + A[i][$1] * x0[$1] } }
-        var M = (0..<m).map { i in (0..<m).map { j in (0..<n).reduce(0) { $0 + A[i][$1] * w[$1] * A[j][$1] } } }
-        for i in 0..<m { M[i][i] += 1e-9 }
+        var r = [Double](repeating: 0, count: m)
+        var M = [[Double]](repeating: [Double](repeating: 0, count: m), count: m)
+        for i in 0..<m {
+            var s = b[i]
+            for k in 0..<n { s -= A[i][k] * x0[k] }
+            r[i] = s
+            for j in 0..<m {
+                var t = 0.0
+                for k in 0..<n { t += A[i][k] * w[k] * A[j][k] }
+                M[i][j] = t
+            }
+            M[i][i] += 1e-9
+        }
         guard let lam = gauss(M, r) else { return nil }
-        let x = (0..<n).map { k in x0[k] + w[k] * (0..<m).reduce(0) { $0 + A[$1][k] * lam[$1] } }
+        var x = [Double](repeating: 0, count: n)
+        for k in 0..<n {
+            var t = 0.0
+            for i in 0..<m { t += A[i][k] * lam[i] }
+            x[k] = x0[k] + w[k] * t
+        }
         guard x.allSatisfy({ $0 > 50 }) else { return nil }
         return x.map { Int(($0 / 10).rounded()) * 10 }
     }
@@ -84,7 +99,9 @@ enum AutoFit {
     static func align(_ walls: [AWall], _ planes: [Plane]) -> Fit? {
         let g = geom(walls), n = walls.count
         guard planes.count >= 2 else { return nil }
-        let diag = hypot((g.P.map(\.x).max() ?? 0) - (g.P.map(\.x).min() ?? 0), (g.P.map(\.y).max() ?? 0) - (g.P.map(\.y).min() ?? 0))
+        let xs: [Double] = g.P.map { Double($0.x) }, ys: [Double] = g.P.map { Double($0.y) }
+        let spanX: Double = (xs.max() ?? 0) - (xs.min() ?? 0), spanY: Double = (ys.max() ?? 0) - (ys.min() ?? 0)
+        let diag: Double = (spanX * spanX + spanY * spanY).squareRoot()
         let tol = max(150, diag * 0.05), atol = 14 * Double.pi / 180
         var best: Fit? = nil
         for (k1, p1) in planes.enumerated() { for i1 in 0..<n {
@@ -126,7 +143,7 @@ enum AutoFit {
             let den = d.x * e.y - d.y * e.x; guard abs(den) > 1e-9 else { continue }
             let w = CGPoint(x: a.x - q.x, y: a.y - q.y)
             let t = (w.x * e.y - w.y * e.x) / den, s = (w.x * d.y - w.y * d.x) / den
-            if t > 1, s >= -0.02, s <= 1.02, t < (best?.1 ?? .infinity) { best = (i, t) }
+            if t > 1, s >= -0.02, s <= 1.02, Double(t) < (best?.1 ?? .infinity) { best = (i, Double(t)) }
         }
         return best
     }
