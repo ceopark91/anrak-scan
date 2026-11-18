@@ -227,7 +227,8 @@ struct CaptureScreen: View {
             if let d = try? JSONEncoder().encode(room), (try? d.write(to: Store.docs.appendingPathComponent(rawName))) != nil { r.raw = rawName }
             r.moldType = mold; r.moldH = moldHeight(mold); r.baseH = base
             r.fixtures = cc.marks.map { m in
-                let q = r.toLocal(CGPoint(x: Double(m.1.x) * 1000, y: Double(m.1.z) * 1000))
+                let k = 1000 * LidarCal.scale
+                let q = r.toLocal(CGPoint(x: Double(m.1.x) * k, y: Double(m.1.z) * k))
                 return Fixture(id: uid(), kind: m.0, x: q.x.rounded(), y: q.y.rounded())
             }
             store.add(r)

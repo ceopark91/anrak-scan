@@ -21,6 +21,7 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSCameraUsageDescription: 라이다·카메라로 방을 스캔하고 치수를 잽니다.
         NSPhotoLibraryUsageDescription: 도면 사진을 불러옵니다.
+        NSBluetoothAlwaysUsageDescription: 블루투스 레이저 측정기(라이카 DISTO)에서 잰 값을 받습니다.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
     settings:

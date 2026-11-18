@@ -49,7 +49,7 @@ struct MemoDepth: Codable {
     }
     func length(_ l: MemoLine) -> Int? {
         guard let a = point(l.ax, l.ay), let b = point(l.bx, l.by) else { return nil }
-        return Int((simd_distance(a, b) * 1000 / 5).rounded()) * 5
+        return Int((simd_distance(a, b) * 1000 * LidarCal.scale / 5).rounded()) * 5
     }
 }
 
@@ -416,6 +416,7 @@ struct LineEditSheet: View {
     var onDelete: () -> Void
     @Environment(\.dismiss) var dismiss
     @State private var text = ""
+    @ObservedObject var laser = LaserLink.shared
 
     var body: some View {
         NavigationStack {
@@ -436,13 +437,18 @@ struct LineEditSheet: View {
                     } else {
                         Text("라이다 값 없음 (앨범 사진이거나 거리가 너무 멂)").font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("블루투스 레이저 측정기를 연결하면 여기에 바로 들어오게 됩니다").font(.caption).foregroundStyle(.secondary)
+                    if laser.connected {
+                        Text("측정기 버튼을 누르면 값이 바로 들어옵니다").font(.caption).foregroundStyle(.green)
+                    } else {
+                        Text("라이카 DISTO를 연결하면(도면 화면 위 [측정기 연결]) 값이 바로 들어옵니다").font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Section { Button("이 선 지우기", role: .destructive) { onDelete(); dismiss() } }
             }
             .navigationTitle("선 치수").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("완료") { dismiss() } } }
             .onAppear { text = line.mm.map { "\($0)" } ?? "" }
+            .onChange(of: laser.seq) { _, _ in if let v = laser.lastMM { text = "\(v)" } }
         }
     }
 }

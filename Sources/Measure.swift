@@ -8,12 +8,13 @@ final class MeasureController: NSObject, ObservableObject {
     @Published var points: [simd_float3] = []
     @Published var live: Int? = nil          // 첫 점 ~ 지금 가운데까지
     @Published var ready = false
+    private var recent: [simd_float3] = []   // 최근 가운데 점들 (손떨림 줄이기)
     private var timer: Timer?
     private var nodes: [SCNNode] = []
 
     var distance: Int? {
         guard points.count == 2 else { return nil }
-        return Int((simd_distance(points[0], points[1]) * 1000).rounded())
+        return Int((Double(simd_distance(points[0], points[1])) * 1000 * LidarCal.scale).rounded())
     }
 
     func start() {
@@ -35,10 +36,20 @@ final class MeasureController: NSObject, ObservableObject {
     private func tick() {
         let h = hit()
         ready = h != nil
-        if points.count == 1, let h { live = Int((simd_distance(points[0], h) * 1000).rounded()) } else { live = nil }
+        if let h {
+            if let l = recent.last, simd_distance(l, h) > 0.03 { recent = [] }   // 크게 움직이면 새로
+            recent.append(h); if recent.count > 6 { recent.removeFirst() }
+        } else { recent = [] }
+        if points.count == 1, let h { live = Int((Double(simd_distance(points[0], h)) * 1000 * LidarCal.scale).rounded()) } else { live = nil }
+    }
+    /// 최근 몇 프레임의 가운데 점을 축마다 중앙값으로 (한 번 찍는 것보다 덜 흔들림)
+    private func steady() -> simd_float3? {
+        guard recent.count >= 3 else { return hit() }
+        func med(_ k: Int) -> Float { let v = recent.map { $0[k] }.sorted(); return v[v.count / 2] }
+        return simd_float3(med(0), med(1), med(2))
     }
     func mark() {
-        guard let h = hit() else { return }
+        guard let h = steady() else { return }
         if points.count >= 2 { reset() }
         points.append(h)
         let n = SCNNode(geometry: SCNSphere(radius: 0.004))
@@ -69,6 +80,8 @@ struct MeasureScreen: View {
     let title: String
     let onUse: (Int) -> Void
     @StateObject private var mc = MeasureController()
+    @ObservedObject var laser = LaserLink.shared
+    @State private var laserVal: Int?
     @Environment(\.dismiss) var dismiss
 
     var body: some View {
@@ -88,6 +101,17 @@ struct MeasureScreen: View {
                     .font(.footnote).foregroundStyle(.white)
                     .padding(.horizontal, 12).padding(.vertical, 7).background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 8))
                 Spacer()
+                if laser.connected {
+                    if let lv = laserVal {
+                        Button { onUse(lv); dismiss() } label: {
+                            Text("레이저 \(mm(lv))mm 적용").font(.title3.weight(.bold)).padding(.horizontal, 18).padding(.vertical, 10)
+                                .background(Color(red: 1, green: 0.82, blue: 0.1), in: Capsule()).foregroundStyle(.black)
+                        }
+                    } else {
+                        Text("측정기 연결됨 · 측정기 버튼을 누르면 그 값을 씁니다").font(.caption).foregroundStyle(.white)
+                            .padding(6).background(.black.opacity(0.55), in: Capsule())
+                    }
+                }
                 if let v = mc.distance ?? mc.live {
                     Text("\(mm(v)) mm").font(.system(size: 34, weight: .bold)).foregroundStyle(.white)
                         .padding(.horizontal, 16).padding(.vertical, 6).background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
@@ -113,6 +137,7 @@ struct MeasureScreen: View {
             }
         }
         .onAppear { mc.start() }
+        .onChange(of: laser.seq) { _, _ in laserVal = laser.lastMM }
         .onDisappear { mc.stop() }
     }
 }

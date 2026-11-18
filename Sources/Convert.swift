@@ -123,7 +123,7 @@ extension simd_float4x4 {
     var xAxis: simd_float3 { simd_normalize(simd_float3(columns.0.x, columns.0.y, columns.0.z)) }
 }
 
-private func plan(_ v: simd_float3) -> CGPoint { CGPoint(x: Double(v.x) * 1000, y: Double(v.z) * 1000) }
+private func plan(_ v: simd_float3) -> CGPoint { let k = 1000 * LidarCal.scale; return CGPoint(x: Double(v.x) * k, y: Double(v.z) * k) }
 
 enum RoomConverter {
     static func convert(_ room: CapturedRoom, name: String, sessionId: String, usdz: String?) -> ScanRoom? {
@@ -133,7 +133,7 @@ enum RoomConverter {
         else { floorY = room.walls.map { $0.transform.pos.y - $0.dimensions.y / 2 }.min() ?? 0 }
 
         // 천장 높이 = 벽 높이의 가운데 값
-        let hs = room.walls.map { Double($0.dimensions.y) * 1000 }.sorted()
+        let hs = room.walls.map { Double($0.dimensions.y) * 1000 * LidarCal.scale }.sorted()
         let ceil = hs.isEmpty ? 2300 : Int((hs[hs.count / 2] / 10).rounded()) * 10
 
         // 벽 선분 (바닥 윤곽 검산 + 바닥 윤곽이 없을 때 대신 씀)
@@ -170,7 +170,8 @@ enum RoomConverter {
             for s in list {
                 let c = s.transform.pos
                 let bottom = Double(c.y - s.dimensions.y / 2 - floorY) * 1000
-                ops.append(PlanOp(kind: kind, c: plan(c), w: Double(s.dimensions.x) * 1000, h: Double(s.dimensions.y) * 1000, sill: bottom))
+                let k = LidarCal.scale
+                ops.append(PlanOp(kind: kind, c: plan(c), w: Double(s.dimensions.x) * 1000 * k, h: Double(s.dimensions.y) * 1000 * k, sill: bottom * k))
             }
         }
         addOps(room.doors, "door")

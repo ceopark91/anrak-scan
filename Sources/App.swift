@@ -114,6 +114,7 @@ struct PlanTab: View {
     @State private var zoomPlan = false
     @State private var building3D = false
     @State private var memos = false
+    @State private var laserSheet = false
 
     var body: some View {
         ScrollView {
@@ -122,6 +123,7 @@ struct PlanTab: View {
                     HStack {
                         Text("ANRAK").font(.caption.weight(.semibold)).tracking(2).foregroundStyle(.secondary)
                         Spacer()
+                        Button { laserSheet = true } label: { LaserBadge() }.foregroundStyle(.black)
                         Menu {
                             Button { store.newSite() } label: { Label("새 현장", systemImage: "plus") }
                             if !store.others.isEmpty {
@@ -206,6 +208,8 @@ struct PlanTab: View {
         }
         .background(bg.ignoresSafeArea())
         .fullScreenCover(isPresented: $scanning) { CaptureScreen().environmentObject(store) }
+        .sheet(isPresented: $laserSheet) { LaserSheet() }
+        .onAppear { LaserLink.shared.wake() }
         .fullScreenCover(isPresented: $memos) { MemoListScreen().environmentObject(store) }
         .fullScreenCover(isPresented: $tracing) { TraceScreen().environmentObject(store) }
         .fullScreenCover(item: Binding(get: { preview.map { ShareItem(url: $0) } }, set: { preview = $0?.url })) { Preview3D(url: $0.url) }

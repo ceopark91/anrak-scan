@@ -53,6 +53,8 @@ struct RoomEditSheet: View {
     @State private var measure: IdString?
     @State private var walls: [AWall] = []
     @State private var fixtures: [Fixture] = []
+    @ObservedObject var laser = LaserLink.shared
+    @State private var laserWall: Int? = nil   // 레이저 값이 들어갈 벽 순번
 
     var body: some View {
         NavigationStack {
@@ -81,11 +83,18 @@ struct RoomEditSheet: View {
                 } header: { Text("천장 기물") } footer: {
                     Text("스캔 중 천장을 가리키고 눌러 찍은 것은 위치까지 도면에 나옵니다. 여기서 늘린 것은 개수만 셉니다(견적 조명 수량에 반영).")
                 }
+                if laser.connected {
+                    Section {
+                        Toggle("레이저로 벽 1부터 차례대로 받기", isOn: Binding(get: { laserWall != nil }, set: { laserWall = $0 ? 0 : nil }))
+                        if let w = laserWall, w < walls.count { Text("지금: 벽 \(w + 1) 차례 · 벽 끝에서 끝까지 쏘세요").font(.caption).foregroundStyle(.green) }
+                    } header: { Text("레이저 측정기") }
+                }
                 Section {
                     ForEach(walls.indices, id: \.self) { i in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack {
-                                Text("벽 \(i + 1)").fontWeight(.semibold)
+                                Text("벽 \(i + 1)").fontWeight(.semibold).foregroundStyle(laserWall == i ? Color.green : Color.primary)
+                                    .onTapGesture { if laser.connected { laserWall = i } }
                                 Spacer()
                                 TextField("0", value: $walls[i].len, format: .number).keyboardType(.numberPad).multilineTextAlignment(.trailing).frame(width: 80)
                                 Text("mm").foregroundStyle(.secondary)
@@ -118,6 +127,11 @@ struct RoomEditSheet: View {
                 if let r = store.site.rooms.first(where: { $0.id == roomId }) {
                     name = r.name; mold = r.moldType ?? "none"; moldH = r.moldH ?? 0; base = r.baseH ?? 0; ceil = r.ceil; walls = r.walls; fixtures = r.fixtures ?? []
                 }
+            }
+            .onChange(of: laser.seq) { _, _ in
+                guard let v = laser.lastMM, let w = laserWall, w < walls.count else { return }
+                walls[w].len = Int((Double(v) / 10).rounded()) * 10
+                laserWall = w + 1 < walls.count ? w + 1 : nil
             }
             .fullScreenCover(item: $measure) { m in
                 MeasureScreen(title: m.id == "mold" ? "몰딩 높이 재기" : m.id == "base" ? "걸레받이 높이 재기" : "천장 높이 재기") { v in
