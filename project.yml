@@ -14,14 +14,17 @@ targets:
       path: Resources/Info.plist
       properties:
         CFBundleDisplayName: 안락 실측
-        CFBundleShortVersionString: "1.5.2"
-        CFBundleVersion: "8"
+        CFBundleShortVersionString: "1.6.0"
+        CFBundleVersion: "9"
         UILaunchScreen: {}
         UIRequiredDeviceCapabilities: [arkit]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         NSCameraUsageDescription: 라이다·카메라로 방을 스캔하고 치수를 잽니다.
         NSPhotoLibraryUsageDescription: 도면 사진을 불러옵니다.
         NSBluetoothAlwaysUsageDescription: 블루투스 레이저 측정기(라이카 DISTO)에서 잰 값을 받습니다.
+        CFBundleURLTypes:
+          - CFBundleURLName: com.anrak.scan
+            CFBundleURLSchemes: [anrakscan]
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
     settings:

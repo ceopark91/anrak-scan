@@ -16,6 +16,7 @@ struct AnrakScanApp: App {
             }
             .tint(.black)
             .environmentObject(store)
+            .onOpenURL { u in if u.scheme == "anrakscan" { store.openScan = true } }   // 웹앱 [아이폰 라이다 스캔]
             .preferredColorScheme(.light)
         }
     }
@@ -116,6 +117,7 @@ struct PlanTab: View {
     @State private var memos = false
     @State private var laserSheet = false
     @State private var sketching = false
+    @State private var sketchEdit: IdString?
 
     var body: some View {
         ScrollView {
@@ -201,6 +203,13 @@ struct PlanTab: View {
                             if let u { preview = u }
                         }
                     }
+                    BigButton(title: "웹앱으로 보내기 (복사 → 웹앱에서 붙여넣기)", icon: "doc.on.clipboard", dark: false) {
+                        if let u = store.exportAnrakJSON(), let t = try? String(contentsOf: u, encoding: .utf8) {
+                            UIPasteboard.general.string = t
+                            message = "복사했습니다. 웹앱 실측 화면에서 [스캔 붙여넣기]를 누르세요"
+                            if let w = URL(string: webAppURL) { UIApplication.shared.open(w) }
+                        }
+                    }
                     HStack(spacing: 10) {
                         BigButton(title: "안락실측", icon: "square.and.arrow.up", dark: false) { share = store.exportAnrakJSON() }
                         BigButton(title: "3D STL", icon: "cube", dark: false) { share = STLExport.build(store: store) }
@@ -213,7 +222,9 @@ struct PlanTab: View {
         .background(bg.ignoresSafeArea())
         .fullScreenCover(isPresented: $scanning) { CaptureScreen().environmentObject(store) }
         .sheet(isPresented: $laserSheet) { LaserSheet() }
+        .onChange(of: store.openScan) { _, v in if v { store.openScan = false; if RoomCaptureSession.isSupported { scanning = true } } }
         .fullScreenCover(isPresented: $sketching) { SketchScreen().environmentObject(store) }
+        .fullScreenCover(item: $sketchEdit) { SketchScreen(editRoomId: $0.id).environmentObject(store) }
         .onAppear { LaserLink.shared.wake() }
         .fullScreenCover(isPresented: $memos) { MemoListScreen().environmentObject(store) }
         .fullScreenCover(isPresented: $tracing) { TraceScreen().environmentObject(store) }
@@ -253,7 +264,8 @@ struct PlanTab: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 10) {
-                Button("고치기") { edit = IdString(id: r.id) }.font(.subheadline)
+                Button("도면 고치기") { sketchEdit = IdString(id: r.id) }.font(.subheadline.weight(.semibold))
+                Button("방 정보") { edit = IdString(id: r.id) }.font(.subheadline)
                 if let f = r.usdz { Button("3D 보기") { preview = Store.docs.appendingPathComponent(f) }.font(.subheadline) }
                 else { Button("3D 보기") { preview = Plan3D.build([store.site.placed(r)], name: r.name) }.font(.subheadline) }
                 Button("삭제") { confirmDelete = r }.font(.subheadline).foregroundStyle(.red)

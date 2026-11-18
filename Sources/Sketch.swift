@@ -4,7 +4,7 @@ import SwiftUI
 // 손으로 그린 선을 꺾이는 점만 남기고(RDP) 각 변을 90°(가깝으면 45°)로 맞춘 뒤,
 // 잰 길이 + 그림 비율로 모자란 길이를 풀어 도형을 닫는다 (가중 최소제곱, 닫힘 조건 2개).
 
-struct SkSeg { var dir: Double; var px: Double; var len: Int = 0 }
+struct SkSeg { var dir: Double; var px: Double; var len: Int = 0; var prior = false }   // prior: px가 이미 mm(스캔 값)
 struct SkResult { var lens: [Int]; var auto: [Bool]; var ok: Bool; var msg: String }
 
 enum SK {
@@ -92,8 +92,9 @@ enum SK {
         let n = segs.count
         let u = segs.map { (cos($0.dir * .pi / 180), sin($0.dir * .pi / 180)) }
         let K = segs.indices.filter { segs[$0].len > 0 }, U = segs.indices.filter { segs[$0].len <= 0 }
-        guard !K.isEmpty else { return SkResult(lens: Array(repeating: 0, count: n), auto: Array(repeating: true, count: n), ok: false, msg: "벽 하나 이상 길이를 넣어 주세요") }
-        let scale = Double(K.reduce(0) { $0 + segs[$1].len }) / K.reduce(0.0) { $0 + segs[$1].px }
+        let allPrior = segs.allSatisfy { $0.prior }
+        guard !K.isEmpty || allPrior else { return SkResult(lens: Array(repeating: 0, count: n), auto: Array(repeating: true, count: n), ok: false, msg: "벽 하나 이상 길이를 넣어 주세요") }
+        let scale = allPrior ? 1 : Double(K.reduce(0) { $0 + segs[$1].len }) / K.reduce(0.0) { $0 + segs[$1].px }
         var lens = segs.map { Double(max(0, $0.len)) }
         let V = U.isEmpty ? K : U
         let x0 = V.map { U.isEmpty ? lens[$0] : segs[$0].px * scale }
@@ -121,6 +122,7 @@ enum SK {
         if bad { msg = "길이가 맞지 않습니다. 그림이나 넣은 치수를 확인해 주세요" }
         else if U.isEmpty && gap0 > 60 { msg = "잰 치수끼리 \(Int(gap0))mm 어긋나 고르게 나눴습니다. 한 번 더 재 보세요" }
         else if U.isEmpty { msg = gap0 > 5 ? "잰 치수 오차 \(Int(gap0))mm를 고르게 나눠 닫았습니다" : "잰 치수로 딱 맞게 닫혔습니다" }
+        else if allPrior { msg = K.isEmpty ? "스캔 값입니다. 번호를 눌러 잰 길이로 고치세요" : "고친 \(K.count)개 벽에 맞춰 나머지를 다시 맞췄습니다" }
         else { msg = "\(U.count)개 벽은 그림 비율과 닫힘으로 자동 계산했습니다" }
         return SkResult(lens: out, auto: segs.indices.map { V.contains($0) }, ok: !bad, msg: msg)
     }
@@ -136,6 +138,7 @@ enum SK {
 // MARK: - 손그림 화면
 
 struct SketchScreen: View {
+    var editRoomId: String? = nil      // 있으면 그 방(스캔·손그림)을 번호 눌러 고치기
     @EnvironmentObject var store: Store
     @Environment(\.dismiss) var dismiss
     @ObservedObject var laser = LaserLink.shared
@@ -169,11 +172,12 @@ struct SketchScreen: View {
                 bottom
             }
             .background(Color(white: 0.96))
-            .navigationTitle("손그림 방").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(editRoomId == nil ? "손그림 방" : "도면 고치기").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("닫기") { dismiss() } }
                 ToolbarItem(placement: .topBarTrailing) { Button("다시 그리기") { raw = []; cur = []; taps = []; segs = nil; msg = nil } }
             }
+            .onAppear { if segs == nil { loadRoom() } }
             .onChange(of: laser.seq) { _, _ in
                 guard let v = laser.lastMM, segs != nil else { return }
                 segs![sel].len = v; next()
@@ -290,7 +294,7 @@ struct SketchScreen: View {
             let g = s[i], a = Q[i], b = Q[i + 1]
             let L = max(1, hypot(b.x - a.x, b.y - a.y)), nx = (b.y - a.y) / L, ny = -(b.x - a.x) / L, tx = (b.x - a.x) / L, ty = (b.y - a.y) / L
             let m = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
-            let val = g.len > 0 ? mm(g.len) : has ? "자동 \(mm(r!.lens[i]))" : "?"
+            let val = g.len > 0 ? mm(g.len) : has ? "\(g.prior ? "스캔" : "자동") \(mm(r!.lens[i]))" : "?"
             let t = ctx.resolve(Text("\(i + 1)  \(val)").font(.caption.weight(g.len > 0 ? .bold : .regular)).foregroundColor(i == sel ? .white : g.len > 0 ? .black : .gray))
             let sz = t.measure(in: CGSize(width: 300, height: 40)); let bw = sz.width + 16
             var cands: [(CGFloat, CGFloat)] = []
@@ -356,7 +360,7 @@ struct SketchScreen: View {
                             .background(name == t ? Color.black : Color.white, in: Capsule()).foregroundStyle(name == t ? .white : .black)
                     } }
                 }
-                Button { save() } label: { Text("이 방 저장").fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 13) }
+                Button { save() } label: { Text(editRoomId == nil ? "이 방 저장" : "고친 도면 저장").fontWeight(.semibold).frame(maxWidth: .infinity).padding(.vertical, 13) }
                     .background(result?.ok == true ? Color.black : Color.gray, in: RoundedRectangle(cornerRadius: 12)).foregroundStyle(.white)
                     .disabled(result?.ok != true)
             }
@@ -365,8 +369,25 @@ struct SketchScreen: View {
         .background(Color(white: 0.96))
     }
 
+    /// 이미 있는 방 → 고치기 화면
+    func loadRoom() {
+        guard let id = editRoomId, let r = store.site.rooms.first(where: { $0.id == id }) else { return }
+        var a = r.rot; var list: [SkSeg] = []
+        for w in r.walls { list.append(SkSeg(dir: SK.norm(a), px: Double(w.len), len: 0, prior: true)); a += w.turnDeg }
+        segs = list; name = r.name; ceil = r.ceil; sel = 0; lenText = ""
+    }
+
     func save() {
         guard let s = segs, let r = result, r.ok else { return }
+        if let id = editRoomId, let i = store.site.rooms.firstIndex(where: { $0.id == id }) {
+            var room = store.site.rooms[i]
+            var walls = SK.walls(s, r.lens)
+            if walls.count == room.walls.count { for k in walls.indices { walls[k].ops = room.walls[k].ops.filter { $0.off < walls[k].len } } }
+            room.walls = walls; room.rot = (s[0].dir * 10).rounded() / 10; room.name = name
+            if (1500...6000).contains(ceil) { room.ceil = ceil }
+            store.site.rooms[i] = room
+            dismiss(); return
+        }
         let room = ScanRoom(id: uid(), name: name, sessionId: "sketch_" + uid(), x: 0, y: 0, rot: (s[0].dir * 10).rounded() / 10,
                             ceil: (1500...6000).contains(ceil) ? ceil : 2300, walls: SK.walls(s, r.lens), usdz: nil, date: Date())
         store.add(room)

@@ -166,6 +166,8 @@ struct Site: Codable, Identifiable {
 
 let roomTypes = ["거실", "주방", "거실·주방", "안방", "작은방", "아이방", "드레스룸", "욕실", "현관", "다용도실", "발코니", "기타"]
 
+let webAppURL = "https://claude.ai/artifact/JmJXisKBGoFivgHyRkBVcZ"
+
 func uid() -> String { String(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().prefix(9)) }
 
 @MainActor
@@ -194,6 +196,7 @@ final class Store: ObservableObject {
 
     // 다른 현장들 (지금 열어 둔 현장은 site)
     @Published var others: [Site] = [] { didSet { saveOthers() } }
+    @Published var openScan = false   // 웹앱에서 스캔 요청
     private var othersFile: URL { Store.docs.appendingPathComponent("others.json") }
     func saveOthers() { if let d = try? JSONEncoder().encode(others) { try? d.write(to: othersFile, options: .atomic) } }
     func newSite() { others.insert(site, at: 0); site = Site() }
