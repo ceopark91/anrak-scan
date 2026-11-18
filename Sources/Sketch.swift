@@ -4,7 +4,7 @@ import SwiftUI
 // 손으로 그린 선을 꺾이는 점만 남기고(RDP) 각 변을 90°(가깝으면 45°)로 맞춘 뒤,
 // 잰 길이 + 그림 비율로 모자란 길이를 풀어 도형을 닫는다 (가중 최소제곱, 닫힘 조건 2개).
 
-struct SkSeg { var dir: Double; var px: Double; var len: Int = 0; var prior = false }   // prior: px가 이미 mm(스캔 값)
+struct SkSeg { var dir: Double; var px: Double; var len: Int = 0; var prior = false; var ops: [AOp] = [] }   // prior: px가 이미 mm(스캔 값)
 struct SkResult { var lens: [Int]; var auto: [Bool]; var ok: Bool; var msg: String }
 
 enum SK {
@@ -137,6 +137,8 @@ enum SK {
 
 // MARK: - 손그림 화면
 
+struct OpHit: Equatable { var wall: Int; var k: Int; var a: CGPoint; var b: CGPoint }
+
 struct SketchScreen: View {
     var editRoomId: String? = nil      // 있으면 그 방(스캔·손그림)을 번호 눌러 고치기
     @EnvironmentObject var store: Store
@@ -152,6 +154,8 @@ struct SketchScreen: View {
     @State private var name = "거실"
     @State private var msg: String?
     @State private var labelPos: [CGPoint] = []
+    @State private var osel: Int? = nil              // 고른 벽의 몇 번째 문·창
+    @State private var opHits: [OpHit] = []
     @FocusState private var focus: Bool
 
     var result: SkResult? { segs.map { SK.solve($0) } }
@@ -208,13 +212,15 @@ struct SketchScreen: View {
     /// 잘못 그린 벽 지우기: 고른 벽을 빼고 같은 방향으로 이어지는 벽은 합침
     func deleteWall() {
         guard var s = segs else { return }
-        s.remove(at: sel)
+        s.remove(at: sel); osel = nil
         var ch = true
         while ch && s.count > 3 {
             ch = false
             for i in s.indices {
                 let j = (i + 1) % s.count
                 if abs(SK.norm(s[i].dir - s[j].dir)) < 0.5 {
+                    let base = s[i].len
+                    s[i].ops += s[j].ops.map { var o = $0; o.off += base; return o }
                     s[i].px += s[j].px
                     s[i].len = (s[i].len > 0 && s[j].len > 0) ? s[i].len + s[j].len : 0
                     s.remove(at: j); ch = true; break
@@ -228,13 +234,23 @@ struct SketchScreen: View {
     func next() {
         guard let s = segs else { return }
         if let j = s.indices.first(where: { $0 > sel && s[$0].len <= 0 }) ?? s.indices.first(where: { s[$0].len <= 0 }) { sel = j } else { sel = (sel + 1) % s.count }
+        osel = nil
         lenText = s[sel].len > 0 ? "\(s[sel].len)" : ""
     }
 
     func pick(_ p: CGPoint) {
+        // 문·창 먼저
+        var ob: OpHit? = nil, od = 18.0
+        for h in opHits {
+            let dx = h.b.x - h.a.x, dy = h.b.y - h.a.y, L2 = max(1, dx * dx + dy * dy)
+            let t = max(0, min(1, ((p.x - h.a.x) * dx + (p.y - h.a.y) * dy) / L2))
+            let d = hypot(p.x - h.a.x - dx * t, p.y - h.a.y - dy * t)
+            if d < od { od = d; ob = h }
+        }
+        if let ob, let s = segs { sel = ob.wall; osel = ob.k; lenText = s[sel].len > 0 ? "\(s[sel].len)" : ""; return }
         var best = -1, bd = 44.0
         for (i, q) in labelPos.enumerated() { let d = hypot(q.x - p.x, q.y - p.y); if d < bd { bd = d; best = i } }
-        if best >= 0, let s = segs { sel = best; lenText = s[best].len > 0 ? "\(s[best].len)" : ""; focus = true }
+        if best >= 0, let s = segs { if best != sel { osel = nil }; sel = best; lenText = s[best].len > 0 ? "\(s[best].len)" : ""; focus = true }
     }
 
     // 보정된 모양 점 (mm 또는 그림 비율)
@@ -249,6 +265,27 @@ struct SketchScreen: View {
             x += cos(g.dir * .pi / 180) * L; y += sin(g.dir * .pi / 180) * L; P.append(CGPoint(x: x, y: y))
         }
         return P
+    }
+
+    /// 화면에 쓰는 벽 길이(mm): 다 풀렸으면 결과, 아니면 그림 비율
+    func shownLens() -> [Int] {
+        guard let s = segs else { return [] }
+        if let r = result, r.lens.allSatisfy({ $0 > 0 }) { return r.lens }
+        return SK.solve(s.map { SkSeg(dir: $0.dir, px: $0.px, len: Int($0.px.rounded())) }).lens
+    }
+
+    func addOp(_ kind: String) {
+        guard segs != nil else { return }
+        let L = shownLens()[sel] > 0 ? shownLens()[sel] : 1800
+        let w = kind == "door" ? 900 : 1200
+        segs![sel].ops.append(AOp(id: uid(), kind: kind, off: max(0, Int((Double(L - w) / 2 / 50).rounded()) * 50), w: w,
+                                  h: kind == "door" ? 2100 : 1200, sill: kind == "door" ? 0 : 900))
+        osel = segs![sel].ops.count - 1
+    }
+
+    func opBinding(_ key: WritableKeyPath<AOp, Int>) -> Binding<Int> {
+        Binding(get: { guard let s = segs, let k = osel, k < s[sel].ops.count else { return 0 }; return s[sel].ops[k][keyPath: key] },
+                set: { v in guard segs != nil, let k = osel, k < segs![sel].ops.count else { return }; segs![sel].ops[k][keyPath: key] = v })
     }
 
     func drawGrid(_ ctx: GraphicsContext, _ size: CGSize) {
@@ -286,6 +323,47 @@ struct SketchScreen: View {
             var p = Path(); p.move(to: a); p.addLine(to: b)
             ctx.stroke(p, with: .color(i == sel ? acc : .black), style: StrokeStyle(lineWidth: i == sel ? 5 : 3, lineCap: .round))
         }
+        // 문·창: 벽을 끊고 문은 여닫는 호, 창은 두 줄. 고른 벽은 기준 모서리와 치수 표시
+        let SL = shownLens(); var hits: [OpHit] = []
+        for i in s.indices where !s[i].ops.isEmpty && SL[i] > 0 {
+            let a = Q[i], b = Q[i + 1], dx = b.x - a.x, dy = b.y - a.y, Ls = max(1, hypot(dx, dy))
+            let tx = dx / Ls, ty = dy / Ls, nx = -ty, ny = tx     // 방 안쪽
+            for (k, o) in s[i].ops.enumerated() {
+                let s0 = max(0, min(1, Double(o.off) / Double(SL[i]))), s1 = max(0, min(1, Double(o.off + o.w) / Double(SL[i])))
+                let p0 = CGPoint(x: a.x + dx * s0, y: a.y + dy * s0), p1 = CGPoint(x: a.x + dx * s1, y: a.y + dy * s1)
+                let on = i == sel && osel == k, col: Color = on ? acc : .black
+                var gap = Path(); gap.move(to: p0); gap.addLine(to: p1)
+                ctx.stroke(gap, with: .color(.white), style: StrokeStyle(lineWidth: 7, lineCap: .butt))
+                for q in [p0, p1] { var t = Path(); t.move(to: CGPoint(x: q.x - nx * 5, y: q.y - ny * 5)); t.addLine(to: CGPoint(x: q.x + nx * 5, y: q.y + ny * 5)); ctx.stroke(t, with: .color(col), lineWidth: on ? 2.5 : 1.6) }
+                let ww = hypot(p1.x - p0.x, p1.y - p0.y)
+                if o.kind == "door" {
+                    var leaf = Path(); leaf.move(to: p0); leaf.addLine(to: CGPoint(x: p0.x + nx * ww, y: p0.y + ny * ww))
+                    ctx.stroke(leaf, with: .color(col), lineWidth: on ? 2.5 : 1.6)
+                    let st = atan2(ny, nx), en = atan2(ty, tx); var d = en - st
+                    while d > .pi { d -= 2 * .pi }; while d < -.pi { d += 2 * .pi }
+                    var arc = Path(); arc.addArc(center: p0, radius: ww, startAngle: .radians(st), endAngle: .radians(st + d), clockwise: d < 0)
+                    ctx.stroke(arc, with: .color(col), style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
+                } else {
+                    for d in [-2.5, 2.5] { var w = Path(); w.move(to: CGPoint(x: p0.x + nx * d, y: p0.y + ny * d)); w.addLine(to: CGPoint(x: p1.x + nx * d, y: p1.y + ny * d)); ctx.stroke(w, with: .color(col), lineWidth: 1.4) }
+                }
+                hits.append(OpHit(wall: i, k: k, a: p0, b: p1))
+                if i == sel {
+                    let off = o.kind == "door" ? ww * 0.5 + 16 : 18
+                    let m = CGPoint(x: (p0.x + p1.x) / 2 + nx * off, y: (p0.y + p1.y) / 2 + ny * off)
+                    let t = ctx.resolve(Text("\(o.kind == "door" ? "문" : "창") \(mm(o.off)) 띄우고 폭 \(mm(o.w))").font(.caption2.weight(.semibold)).foregroundColor(on ? .white : .black))
+                    let sz = t.measure(in: CGSize(width: 300, height: 30)); let box = CGRect(x: m.x - sz.width / 2 - 6, y: m.y - 11, width: sz.width + 12, height: 22)
+                    ctx.fill(Path(roundedRect: box, cornerRadius: 11), with: .color(on ? acc : .white))
+                    ctx.stroke(Path(roundedRect: box, cornerRadius: 11), with: .color(Color(white: 0.85)), lineWidth: 1)
+                    ctx.draw(t, at: m)
+                }
+            }
+        }
+        if sel < s.count, !s[sel].ops.isEmpty {
+            let a = Q[sel], b = Q[sel + 1], L = max(1, hypot(b.x - a.x, b.y - a.y)), ux = (b.x - a.x) / L, uy = (b.y - a.y) / L
+            ctx.fill(Path(ellipseIn: CGRect(x: a.x - 6, y: a.y - 6, width: 12, height: 12)), with: .color(acc))
+            ctx.draw(Text("기준").font(.caption2.weight(.semibold)).foregroundColor(acc), at: CGPoint(x: a.x - ux * 18 + uy * 18, y: a.y - uy * 18 - ux * 18))
+        }
+        DispatchQueue.main.async { if hits != opHits { opHits = hits } }
         // 이름표: 짧은 벽부터 겹치지 않는 자리를 찾고, 멀리 밀리면 벽까지 지시선
         var boxes: [CGRect] = []
         let order = s.indices.sorted { hypot(Q[$0 + 1].x - Q[$0].x, Q[$0 + 1].y - Q[$0].y) < hypot(Q[$1 + 1].x - Q[$1].x, Q[$1 + 1].y - Q[$1].y) }
@@ -347,6 +425,27 @@ struct SketchScreen: View {
                     Button("지우기") { deleteWall() }.buttonStyle(.bordered).tint(.red)
                     if laser.connected { Button("측정") { laser.trigger() }.buttonStyle(.bordered) }
                 }
+                HStack(spacing: 6) {
+                    Button("+ 문") { addOp("door") }.buttonStyle(.bordered)
+                    Button("+ 창") { addOp("window") }.buttonStyle(.bordered)
+                    if sel < s.count {
+                        ForEach(Array(s[sel].ops.enumerated()), id: \.offset) { k, o in
+                            Button("\(o.kind == "door" ? "문" : "창")\(k + 1)") { osel = k }
+                                .buttonStyle(.bordered).tint(osel == k ? .black : .gray)
+                        }
+                        if s[sel].ops.isEmpty { Text("문·창이 있으면 눌러 넣기").font(.caption).foregroundStyle(.secondary) }
+                    }
+                    Spacer(minLength: 0)
+                }
+                if let k = osel, sel < s.count, k < s[sel].ops.count {
+                    HStack(alignment: .bottom, spacing: 6) {
+                        opField("기준 모서리에서", \.off)
+                        opField("폭", \.w)
+                        opField("높이", \.h)
+                        if s[sel].ops[k].kind == "window" { opField("바닥에서", \.sill) }
+                        Button("빼기") { segs![sel].ops.remove(at: k); osel = nil }.buttonStyle(.bordered).tint(.red)
+                    }
+                }
                 HStack(spacing: 8) {
                     Text("천장고").font(.subheadline)
                     TextField("2300", value: $ceil, format: .number).keyboardType(.numberPad).frame(width: 70)
@@ -369,12 +468,24 @@ struct SketchScreen: View {
         .background(Color(white: 0.96))
     }
 
+    func opField(_ label: String, _ key: WritableKeyPath<AOp, Int>) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            TextField("0", value: opBinding(key), format: .number).keyboardType(.numberPad)
+                .padding(8).background(Color.white, in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
     /// 이미 있는 방 → 고치기 화면
     func loadRoom() {
         guard let id = editRoomId, let r = store.site.rooms.first(where: { $0.id == id }) else { return }
         var a = r.rot; var list: [SkSeg] = []
-        for w in r.walls { list.append(SkSeg(dir: SK.norm(a), px: Double(w.len), len: 0, prior: true)); a += w.turnDeg }
+        for w in r.walls { list.append(SkSeg(dir: SK.norm(a), px: Double(w.len), len: 0, prior: true, ops: w.ops)); a += w.turnDeg }
         segs = list; name = r.name; ceil = r.ceil; sel = 0; lenText = ""
+    }
+
+    func clampOps(_ ops: [AOp], _ len: Int) -> [AOp] {
+        ops.map { var o = $0; o.w = min(o.w, len); o.off = max(0, min(o.off, len - o.w)); return o }
     }
 
     func save() {
@@ -382,14 +493,14 @@ struct SketchScreen: View {
         if let id = editRoomId, let i = store.site.rooms.firstIndex(where: { $0.id == id }) {
             var room = store.site.rooms[i]
             var walls = SK.walls(s, r.lens)
-            if walls.count == room.walls.count { for k in walls.indices { walls[k].ops = room.walls[k].ops.filter { $0.off < walls[k].len } } }
+            for k in walls.indices { walls[k].ops = clampOps(s[k].ops, walls[k].len) }
             room.walls = walls; room.rot = (s[0].dir * 10).rounded() / 10; room.name = name
             if (1500...6000).contains(ceil) { room.ceil = ceil }
             store.site.rooms[i] = room
             dismiss(); return
         }
         let room = ScanRoom(id: uid(), name: name, sessionId: "sketch_" + uid(), x: 0, y: 0, rot: (s[0].dir * 10).rounded() / 10,
-                            ceil: (1500...6000).contains(ceil) ? ceil : 2300, walls: SK.walls(s, r.lens), usdz: nil, date: Date())
+                            ceil: (1500...6000).contains(ceil) ? ceil : 2300, walls: SK.walls(s, r.lens).enumerated().map { k, w in var w = w; w.ops = clampOps(s[k].ops, w.len); return w }, usdz: nil, date: Date())
         store.add(room)
         dismiss()
     }
