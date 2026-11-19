@@ -284,6 +284,8 @@ final class Store: ObservableObject {
                 "bb": r.bb ?? r.baseH ?? 0, "bbT": r.bbT ?? 9, "ceilT": r.ceilT ?? "flat",
                 "wells": (r.wells ?? []).map { ["x": $0.x, "y": $0.y, "a": $0.a, "b": $0.b, "d": $0.d] },
                 "marks": (r.marks ?? []).map { ["k": $0.k, "x": $0.x, "y": $0.y] },
+                "objs": (r.objs ?? []).map { ["kind": $0.kind, "x": $0.x.rounded(), "y": $0.y.rounded(), "w": $0.w, "d": $0.d, "h": $0.h, "rot": ($0.rot * 10).rounded() / 10] as [String: Any] },
+                "elec": (r.elec ?? []).map { ["k": $0.k, "h": $0.h, "n": $0.n] as [String: Any] },
                 "memo": "안락 스캔(라이다)으로 잰 치수 · 오차 ±2cm 안팎, 시공 전 주요 치수는 줄자로 확인",
                 "photos": [Any]()
             ]
@@ -293,7 +295,8 @@ final class Store: ObservableObject {
             "id": uid(), "name": name, "client": "", "addr": site.addr,
             "date": df.string(from: Date()),
             "memo": "아이폰 라이다로 스캔한 도면 (방 \(site.rooms.count)개)",
-            "wallT": 150, "rooms": rooms, "created": Int(Date().timeIntervalSince1970 * 1000)
+            "wallT": 150, "rooms": rooms,
+            "checks": site.checks.mapValues { ["state": $0.state, "note": $0.note] as [String: Any] }, "created": Int(Date().timeIntervalSince1970 * 1000)
         ]
         let root: [String: Any] = ["app": "anrak-measure", "v": 1, "project": project]
         guard let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) else { return nil }
