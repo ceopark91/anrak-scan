@@ -121,6 +121,7 @@ struct PlanTab: View {
     @State private var ceilEdit: IdString?
     @State private var aimEdit: IdString?
     @State private var flatOpen = false
+    @State private var elecEdit: IdString?
     @State private var checking = false
 
     var body: some View {
@@ -243,6 +244,7 @@ struct PlanTab: View {
         .fullScreenCover(item: $ceilEdit) { CeilingScreen(roomId: $0.id).environmentObject(store) }
         .fullScreenCover(item: $aimEdit) { AutoMeasureScreen(roomId: $0.id).environmentObject(store) }
         .fullScreenCover(isPresented: $flatOpen) { FlatnessScreen() }
+        .fullScreenCover(item: $elecEdit) { ElectricScreen(roomId: $0.id).environmentObject(store) }
         .onAppear { LaserLink.shared.wake(); Furn.backfill(store) }
         .fullScreenCover(isPresented: $memos) { MemoListScreen().environmentObject(store) }
         .sheet(isPresented: $checking) { ChecklistScreen().environmentObject(store) }
@@ -278,6 +280,7 @@ struct PlanTab: View {
                     Text("천장: " + fixtureKinds.compactMap { k in r.count(k.0) > 0 ? "\(k.1) \(r.count(k.0))" : nil }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
                 }
                 if !(r.objs ?? []).isEmpty { Text("가구: " + r.furnitureSummary).font(.caption).foregroundStyle(.secondary) }
+                if !(r.elec ?? []).isEmpty { Text(r.elecSummary).font(.caption).foregroundStyle(.secondary) }
                 if r.gap > 60 { Text("벽 길이가 서로 안 맞습니다 (끝점 \(mm(r.gap))mm 어긋남)").font(.caption).foregroundStyle(.red) }
                 Text((r.mold?.k == "crown" ? "각몰딩 \(r.mold!.w)·\(r.mold!.a)°" : "몰딩 \(moldName(r.moldType))") + (r.ceilT == "well" ? " · 우물 \((r.wells ?? []).count)" : "") + ((r.marks ?? []).isEmpty ? "" : " · 조명 \((r.marks ?? []).filter { $0.k == "light" }.count) · 실링팬 \((r.marks ?? []).filter { $0.k == "fan" }.count)") + " · 걸레받이 \((r.baseH ?? 0) == 0 ? "없음" : "\(r.baseH ?? 0)mm") · 도배 높이 \(mm(r.paperH))")
                     .font(.caption).foregroundStyle(.secondary)
@@ -287,6 +290,7 @@ struct PlanTab: View {
                 Button("도면 고치기") { sketchEdit = IdString(id: r.id) }.font(.subheadline.weight(.semibold))
                 Button("겨눠서 재기") { aimEdit = IdString(id: r.id) }.font(.subheadline)
                 Button("천장·몰딩") { ceilEdit = IdString(id: r.id) }.font(.subheadline)
+                Button("콘센트·스위치") { elecEdit = IdString(id: r.id) }.font(.subheadline)
                 Button("벽 휨 보기") { flatOpen = true }.font(.subheadline)
                 Button("방 정보") { edit = IdString(id: r.id) }.font(.subheadline)
                 Button("3D 보기") { preview = Plan3D.build([store.site.placed(r)], name: r.name) }.font(.subheadline)

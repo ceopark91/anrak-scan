@@ -65,6 +65,7 @@ struct ScanRoom: Codable, Identifiable, Hashable {
     var wells: [AWell]? = nil
     var marks: [AMark]? = nil
     var objs: [AObj]? = nil       // 스캔한 가구 (방 좌표)
+    var elec: [AElec]? = nil      // 콘센트·스위치 (바닥에서 높이)
     /// 도배하는 벽 높이 = 천장 높이 − 몰딩 − 걸레받이
     var paperH: Int { max(300, ceil - ((moldType ?? "none") == "none" ? 0 : (moldH ?? 0)) - (baseH ?? 0)) }
     var date: Date
