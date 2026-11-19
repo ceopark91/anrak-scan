@@ -40,7 +40,7 @@ final class ElecLearn {
     struct Ex: Codable { var id: String; var k: String; var fp: Data }
     private(set) var ex: [Ex] = []
     private var obs: [String: VNFeaturePrintObservation] = [:]
-    private var url: URL { Store.docs.appendingPathComponent("elec_learn.json") }
+    private var url: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("elec_learn.json") }
     init() {
         if let d = try? Data(contentsOf: url), let a = try? JSONDecoder().decode([Ex].self, from: d) { ex = a }
         for e in ex { if let o = try? NSKeyedUnarchiver.unarchivedObject(ofClass: VNFeaturePrintObservation.self, from: e.fp) { obs[e.id] = o } }
@@ -172,7 +172,7 @@ final class ElecController: NSObject, ObservableObject, ARSessionDelegate {
 
 /// 한국 현장 학습용 사진: 정할 때마다 그 부분을 잘라 저장 (나중에 우리 현장 모델 학습)
 enum ElecTrain {
-    static var dir: URL { let d = Store.docs.appendingPathComponent("elec_train"); try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true); return d }
+    static var dir: URL { let d = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("elec_train"); try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true); return d }
     static var files: [URL] { ((try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []).filter { $0.pathExtension == "jpg" } }
     /// 화면 캡처에서 box(화면 좌표) 둘레를 넉넉히 잘라 저장. 파일 이름 = 종류_id_상자(잘린 사진 안 x,y,w,h 비율)
     static func save(_ shot: UIImage, box: CGRect, kind: String) {
