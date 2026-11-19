@@ -341,7 +341,7 @@ struct MemoEditor: View {
     @State private var share: URL?
     @State private var autoSegs: [AutoSeg] = []
     @State private var pickSeg: Int? = nil          // 고른 자동 선
-    @AppStorage("memoAutoLine") private var autoOn = true
+    @AppStorage("memoAutoLine2") private var autoOn = false
 
     var idx: Int? { store.site.memos.firstIndex { $0.id == memoId } }
 
