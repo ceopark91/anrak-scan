@@ -290,7 +290,7 @@ struct PlanTab: View {
                 Button("도면 고치기") { sketchEdit = IdString(id: r.id) }.font(.subheadline.weight(.semibold))
                 Button("겨눠서 재기") { aimEdit = IdString(id: r.id) }.font(.subheadline)
                 Button("천장·몰딩") { ceilEdit = IdString(id: r.id) }.font(.subheadline)
-                Button("콘센트·스위치") { elecEdit = IdString(id: r.id) }.font(.subheadline)
+                Button("콘센트·스위치·단자") { elecEdit = IdString(id: r.id) }.font(.subheadline)
                 Button("벽 휨 보기") { flatOpen = true }.font(.subheadline)
                 Button("방 정보") { edit = IdString(id: r.id) }.font(.subheadline)
                 Button("3D 보기") { preview = Plan3D.build([store.site.placed(r)], name: r.name) }.font(.subheadline)
